@@ -1,0 +1,39 @@
+{
+    "name": "VboBase.Runtime",
+    "rootNamespace": "",
+    "references": [
+        "Unity.InputSystem",
+        "OpenVrBridge",
+        "StrikerLink.Unity.Runtime",
+        "Unity.XR.OpenXR",
+        "SteamVR",
+        "Vbo.GameConfig",
+        "SteamVR_Actions",
+        "Vbo.GameScore"
+    ],
+    "includePlatforms": [],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [
+        {
+            "name": "com.strikervr.strikersdk",
+            "expression": "0.0.1",
+            "define": "STRIKER_LINK"
+        },
+        {
+            "name": "com.unity.xr.openxr",
+            "expression": "0.0.1",
+            "define": "OPENXR"
+        },
+        {
+            "name": "com.unity.xr.openvr.standalone",
+            "expression": "0.0.1",
+            "define": "OFFICIELOPENVR"
+        }
+    ],
+    "noEngineReferences": false
+}

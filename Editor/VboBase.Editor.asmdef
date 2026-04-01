@@ -1,0 +1,27 @@
+{
+    "name": "VboBase.Editor",
+    "references": [
+        "VboBase.Runtime",
+        "Unity.InputSystem",
+        "OpenVrBridge",
+        "StrikerLink.Unity.Runtime",
+        "SteamVR"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [
+        {
+            "name": "com.strikervr.strikersdk",
+            "expression": "0.01",
+            "define": "STRIKER_LINK"
+        }
+    ],
+    "noEngineReferences": false
+}

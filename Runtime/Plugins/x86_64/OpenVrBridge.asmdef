@@ -1,0 +1,23 @@
+{
+    "name": "OpenVrBridge",
+    "references": [],
+    "includePlatforms": [
+        "Editor",
+        "WindowsStandalone32",
+        "WindowsStandalone64"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [
+        {
+            "name": "com.unity.xr.openvr.standalone",
+            "define": "OFFICIELOPENVR",
+            "expression": "0.0.1"
+        }
+    ],
+    "noEngineReferences": false
+}

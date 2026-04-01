@@ -1,0 +1,27 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 4536948e1cd84fffbf070cb6c1abb6da, type: 3}
+  m_Name: WeaponGhostLibrary
+  m_EditorClassIdentifier: VboBase.Runtime::VBO_Ultimate.Runtime.Scripts.Input.WeaponGhostLibrary
+  entries:
+  - friendlyName: Varonia Gun
+    mesh: {fileID: 119297527666909937, guid: 88979fc7c83f1144b81ae1582b153fe1, type: 3}
+    positionOffset: {x: 0, y: 0, z: 0}
+    rotationOffset: {x: 0, y: 0, z: 0}
+  - friendlyName: Striker
+    mesh: {fileID: -5100565277798778086, guid: 7a771534fb869fe4e8e9b9b25fb73549, type: 3}
+    positionOffset: {x: 0, y: 0, z: 0}
+    rotationOffset: {x: 270, y: 270, z: 0}
+  - friendlyName: Focus 3 Ctrl Right
+    mesh: {fileID: 7684625086359004581, guid: 3d75dd32c3cc854439785aac0fcdc9b7, type: 3}
+    positionOffset: {x: 0, y: 0.05, z: 0}
+    rotationOffset: {x: 60, y: -90, z: 0}

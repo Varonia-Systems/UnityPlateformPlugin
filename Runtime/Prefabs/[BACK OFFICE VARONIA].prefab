@@ -1,0 +1,460 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!1 &6071055975095573427
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1067303739859847874}
+  - component: {fileID: 7499088816978905918}
+  - component: {fileID: 7135546041003525929}
+  - component: {fileID: 8427173159514802381}
+  - component: {fileID: 4516403077833795800}
+  - component: {fileID: 8283254357776771328}
+  - component: {fileID: 3277909268905259034}
+  - component: {fileID: 2167615902921963347}
+  - component: {fileID: 3100889425256832166}
+  - component: {fileID: 8446599911813911572}
+  m_Layer: 0
+  m_Name: ---DEBUG---
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &1067303739859847874
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6071055975095573427}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 8790056858795244882}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &7499088816978905918
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6071055975095573427}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 0c72164e2646f9f4083dbfce10876437, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: VboBase.Runtime::VaroniaBackOffice.VaroniaFPSDisplay
+  corner: 0
+  margin: 12
+  size: {x: 180, y: 120}
+  sampleCount: 200
+  updateInterval: 0.1
+  memUpdateInterval: 0.5
+  thresholdGood: 55
+  thresholdWarn: 30
+--- !u!114 &7135546041003525929
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6071055975095573427}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: cd4234c914c04a64598870852e0993cc, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: VboBase.Runtime::VaroniaBackOffice.VaroniaInfoDisplay
+  corner: 3
+  margin: 12
+  size: {x: 190, y: 100}
+  _camera: {fileID: 0}
+--- !u!114 &8427173159514802381
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6071055975095573427}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: d9b799f7ba0c7ea4595b92889e45a8ec, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: VboBase.Runtime::VaroniaBackOffice.VaroniaLatencyChart
+  corner: 2
+  margin: 12
+  size: {x: 340, y: 120}
+  wsUrl: ws://localhost:8082/api/events
+  timeoutSeconds: 5
+  maxBars: 80
+  maxLatency: 40
+  maxTotalLatency: 100
+  orangeThreshold: 15
+  redThreshold: 30
+  orangeTotalThreshold: 60
+  redTotalThreshold: 90
+  orangeEncodeThreshold: 10
+  redEncodeThreshold: 20
+  orangeDecodeThreshold: 10
+  redDecodeThreshold: 20
+--- !u!114 &4516403077833795800
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6071055975095573427}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 3bc3186cd1f54da7b8133d9052fa8283, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: VboBase.Runtime::VaroniaBackOffice.DebugModeOverlay
+  margin: 12
+  size: {x: 160, y: 52}
+--- !u!114 &8283254357776771328
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6071055975095573427}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 733e55f206724085bcf1e53db5065810, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: VboBase.Runtime::VaroniaBackOffice.DebugCameraRig
+  rig: {fileID: 0}
+  cam: {fileID: 0}
+  moveSpeed: 3
+  fastMultiplier: 4
+  rotateSpeed: 60
+--- !u!114 &3277909268905259034
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6071055975095573427}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 2ca73c71acec40dd934e4482de858e9b, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: VboBase.Runtime::VaroniaBackOffice.WorldSpaceDebugUI
+  canvasDistance: 1.2
+  canvasWorldWidth: 1.4
+  canvasWorldHeight: 0.9
+  canvasResolution: {x: 1400, y: 900}
+  verticalOffset: 0
+  followSpeed: 10
+  alwaysFaceCamera: 1
+  alwaysOnTop: 1
+  panelPadding: 12
+  panelSpacing: 8
+--- !u!114 &2167615902921963347
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6071055975095573427}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 382e36f993794648a9bdb6e430f3b71e, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::DebugSceneMenu
+  width: 500
+  scenesPerPage: 10
+--- !u!114 &3100889425256832166
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6071055975095573427}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: dc244b307706bfd4e84b086a34ead4b2, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: VboBase.Runtime::VBSLatencyChart
+  corner: 2
+  size: {x: 420, y: 120}
+  margin: 12
+  maxBars: 50
+  barHeight: 18
+  barGap: 3
+  helmet: 0
+  tracking: 0
+--- !u!114 &8446599911813911572
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6071055975095573427}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 6f56db1310b7423798e2f2fa345df3ce, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: VboBase.Runtime::VaroniaBackOffice.VaroniaConsoleDisplay
+  corner: 1
+  margin: 12
+  size: {x: 1100, y: 500}
+  fontSize: 16
+  showErrors: 1
+  showWarnings: 1
+  showInfos: 1
+  maxEntries: 200
+  logRefreshInterval: 1
+--- !u!1 &6338798957218358811
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 8790056858795244882}
+  - component: {fileID: 5181100845132377117}
+  - component: {fileID: 2999505759804885042}
+  - component: {fileID: 7182524402104408806}
+  - component: {fileID: 470446828567142922}
+  - component: {fileID: 6326040957899899635}
+  - component: {fileID: 4511603572043744829}
+  - component: {fileID: 4963757222226558641}
+  m_Layer: 0
+  m_Name: '[BACK OFFICE VARONIA]'
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!4 &8790056858795244882
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6338798957218358811}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 1.13354, y: 0, z: -2.56938}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children:
+  - {fileID: 1067303739859847874}
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &5181100845132377117
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6338798957218358811}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 510da9c57f7eda64ea3fcb554382d3cb, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: VboBase.Runtime::VaroniaBackOffice.BackOfficeVaronia
+  OnStartWithTuto:
+    m_PersistentCalls:
+      m_Calls: []
+  OnStartSkipTuto:
+    m_PersistentCalls:
+      m_Calls: []
+  _isStarted: 0
+  _isTutoSkipped: 0
+  _mainCamera: {fileID: 0}
+  _rig: {fileID: 0}
+  config:
+    ServerIP: 
+    MQTT_ServerIP: 
+    MQTT_IDClient: 0
+    DeviceMode: 0
+    Language: 
+    MainHand: 0
+    PlayerName: 
+    hideMode: 0
+    Direct: 0
+    Controller: 0
+  gameConfig:
+    Dificulty: 0
+  mqttClient: {fileID: 0}
+--- !u!114 &2999505759804885042
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6338798957218358811}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a15ce2bbaa8e0e048aa79b451ca4b1f0, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: VboBase.Runtime::VaroniaBackOffice.AutoSizing
+  targetSamples: 150
+  maxLookAngle: 10
+  maxVerticalSpeed: 0.03
+--- !u!114 &7182524402104408806
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6338798957218358811}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 5ffa5511c849401e89abdcd3733f4b68, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: VboBase.Runtime::VaroniaBackOffice.VaroniaInput
+  OnPrimaryDown:
+    m_PersistentCalls:
+      m_Calls: []
+  OnPrimaryUp:
+    m_PersistentCalls:
+      m_Calls: []
+  OnSecondaryDown:
+    m_PersistentCalls:
+      m_Calls: []
+  OnSecondaryUp:
+    m_PersistentCalls:
+      m_Calls: []
+  OnTertiaryDown:
+    m_PersistentCalls:
+      m_Calls: []
+  OnTertiaryUp:
+    m_PersistentCalls:
+      m_Calls: []
+  OnQuaternaryDown:
+    m_PersistentCalls:
+      m_Calls: []
+  OnQuaternaryUp:
+    m_PersistentCalls:
+      m_Calls: []
+--- !u!114 &470446828567142922
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6338798957218358811}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 09aa5f1200719924db0a2291b0f1712a, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: VboBase.Runtime::MQTTVaronia
+  brokerAddress: localhost
+  brokerPort: 1883
+  isEncrypted: 0
+  connectionDelay: 500
+  timeoutOnConnection: 30000
+  mqttUserName: 
+  mqttPassword: 
+--- !u!114 &6326040957899899635
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6338798957218358811}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 537c4a8dbad1edf4a84cbc1828d58472, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: VboBase.Runtime::VaroniaBackOffice.VaroniaSpatialLoader
+--- !u!114 &4511603572043744829
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6338798957218358811}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 3b7ae8cc11cc482db86950231e82d641, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: VboBase.Runtime::VBO_Ultimate.Runtime.Scripts.Input.VaroniaWeapon
+  weaponList:
+  - {fileID: 11400000, guid: 6d2f33a4548efde4c96c82d347060765, type: 2}
+  - {fileID: 11400000, guid: d1d9c37d2fecc7a488baec19717c58cb, type: 2}
+  - {fileID: 11400000, guid: 3ac08eda8e7a58d4d815142d9e5d2f50, type: 2}
+  - {fileID: 11400000, guid: 0523bfb2f1a883a4fbc5b93729105bd0, type: 2}
+  - {fileID: 11400000, guid: 6227fbbbea6ca374885122050cd10428, type: 2}
+  currentweapons: []
+--- !u!114 &4963757222226558641
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 6338798957218358811}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: e30775e6b73977640a081f242f8fcb5a, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: VboBase.Runtime::VBO_Ultimate.Runtime.Scripts.UI.Rating3DUI
+  starEmptyResource: StarEmpty
+  starFilledResource: StarFilled
+  backgroundResource: Bg
+  customFont: {fileID: 12800000, guid: c0ad00f6770a86940b5d0ad256674fc7, type: 3}
+  emptyColor: {r: 0.8584906, g: 0.8584906, b: 0.8584906, a: 1}
+  filledColor: {r: 1, g: 1, b: 1, a: 1}
+  hoverColor: {r: 0.9811321, g: 0.9119998, b: 0.80989677, a: 1}
+  backgroundColor: {r: 0.13207549, g: 0.13207549, b: 0.13207549, a: 0.78431374}
+  textColor: {r: 1, g: 1, b: 1, a: 1}
+  followDistance: 4
+  followSpeed: 5
+  starSize: {x: 20, y: 20}
+  starSpacing: 30
+  padding: {x: 20, y: 20}
+  textPanelHeight: 40
+  textPanelMargin: 10
+  fontSize: 12
+  useShadow: 1
+  shadowColor: {r: 0, g: 0, b: 0, a: 0.5}
+  shadowEffectDistance: {x: 1.5, y: -1.5}
+  textPulseSpeed: 2
+  textPulseAmount: 0.05
+  textFR: "Notez votre exp\xE9rience"
+  textEN: Rate your experience
+  textES: Califica tu experiencia
+  thankYouFR: Merci de votre retour !
+  thankYouEN: Thank you for your feedback!
+  thankYouES: "\xA1Gracias por sus comentarios!"
+  thankYouDisplayTime: 3
+  currentRating: 0
+  hoveredRating: 0
+  isVisible: 1
+  isShowingThankYou: 0
+  debugStart: 0
+  selectionHoldTime: 0.3
+  laserActivationHitboxTolerance: 5
+  laserPoints: 15
+  laserArcHeight: 0
+  spawnSound: {fileID: 8300000, guid: 0c85bb26a50cd6543b36be046c45397c, type: 3}
+  spawnVolume: 1
+  hoverSound: {fileID: 8300000, guid: 6c6a0e71370366f4eac5edf304b3f579, type: 3}
+  hoverVolume: 0.25
+  chargeSound: {fileID: 8300000, guid: 9bac55108ea5dab48b8121e0562559a2, type: 3}
+  chargeVolume: 1
+  chargePitchStart: 1
+  chargePitchEnd: 1.5
+  successSound: {fileID: 8300000, guid: 53fb3f60ac8c3e8498ef6a55190039fc, type: 3}
+  successVolume: 1
+  cancelSound: {fileID: 0}
+  cancelVolume: 1
+  useLineRenderer: 1
+  lineWidth: 0.02
+  hitboxTolerance: 1.5
+  laserLagSpeed: 12
+  laserFadeSpeed: 10
+  alwaysOnTop: 1
+  lineColorStart: {r: 1, g: 1, b: 1, a: 0.11764706}
+  lineColorEnd: {r: 1, g: 1, b: 1, a: 0.88235295}
