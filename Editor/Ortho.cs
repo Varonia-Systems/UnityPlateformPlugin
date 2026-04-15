@@ -484,9 +484,10 @@ namespace VaroniaBackOffice
                 DrawSectionLabel("CAMERA");
                 EditorGUILayout.Space(4); DrawDivider(); EditorGUILayout.Space(10);
                 EditorGUI.BeginChangeCheck();
-                DrawSliderRow("Zoom (Size)",  ref _orthoSize,    1f, 150f, $"{_orthoSize:F1}");
+                DrawSliderRow("Zoom (Size)",  ref _orthoSize,    1f, 150f, $"{Mathf.RoundToInt(_orthoSize)}");
+                _orthoSize = Mathf.RoundToInt(_orthoSize);
                 EditorGUILayout.Space(6);
-                DrawSliderRow("Altitude (Y)", ref _cameraHeight, 1f, 300f, $"{_cameraHeight:F0} m");
+                DrawSliderRow("Altitude (Y)", ref _cameraHeight, 1f, 300f, $"{_cameraHeight:F1} m");
                 if (EditorGUI.EndChangeCheck()) UpdateCamera();
                 EditorGUILayout.Space(4);
             }, colAccent);
@@ -857,7 +858,23 @@ namespace VaroniaBackOffice
             if (string.IsNullOrEmpty(scene)) scene="UntitledScene";
             string fileName=$"{scene}_{_orthoSize:F0}.jpg";
             string dir=EditorPrefs.GetString(k_PathKey);
-            if (string.IsNullOrEmpty(dir)||!Directory.Exists(dir)) dir=Application.dataPath;
+            bool usingOrthoSource = !string.IsNullOrEmpty(dir) && Directory.Exists(dir);
+            if (!usingOrthoSource) dir=Application.dataPath;
+            if (usingOrthoSource)
+            {
+                string gameId = "";
+                try
+                {
+                    string gidPath = Application.streamingAssetsPath + "/GameID.txt";
+                    if (File.Exists(gidPath)) gameId = File.ReadAllText(gidPath).Trim();
+                }
+                catch { }
+                if (!string.IsNullOrEmpty(gameId))
+                {
+                    dir = Path.Combine(dir, gameId);
+                    if (!Directory.Exists(dir)) Directory.CreateDirectory(dir);
+                }
+            }
             string path=Path.Combine(dir,fileName);
             File.WriteAllBytes(path,bytes);
             if (path.StartsWith(Application.dataPath)) AssetDatabase.Refresh();
