@@ -1,11 +1,13 @@
 {
     "name": "VboBase.Editor",
+    "rootNamespace": "",
     "references": [
         "VboBase.Runtime",
         "Unity.InputSystem",
         "OpenVrBridge",
         "StrikerLink.Unity.Runtime",
-        "SteamVR"
+        "SteamVR",
+        "Vbo.GameConfig"
     ],
     "includePlatforms": [
         "Editor"

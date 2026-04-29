@@ -259,12 +259,45 @@ namespace VaroniaBackOffice
             // ── JSON Configuration card ──
             DrawCard(() =>
             {
-                DrawSectionLabel("JSON CONFIGURATION");
+                DrawSectionLabel("JSON CONFIGURATION (LIVE)");
                 DrawDivider();
                 GUILayout.Space(6);
 
-                using (new EditorGUI.DisabledScope(true))
-                    EditorGUILayout.PropertyField(serializedObject.FindProperty("config"), true);
+                if (script.config == null)
+                {
+                    GUILayout.Label("Config not loaded yet.", readOnlyStyle);
+                }
+                else
+                {
+                    DrawConfigFields(script.config);
+                }
+
+                if (script.extraFields != null && script.extraFields.Count > 0)
+                {
+                    GUILayout.Space(8);
+                    GUILayout.Label("EXTRA / DYNAMIC FIELDS", sectionStyle);
+                    DrawDivider();
+                    GUILayout.Space(4);
+
+                    foreach (var kvp in script.extraFields)
+                    {
+                        EditorGUILayout.BeginHorizontal();
+                        GUILayout.Label(kvp.Key, fieldLabelStyle, GUILayout.Width(180));
+                        GUILayout.Label(kvp.Value != null ? kvp.Value.ToString() : "null", readOnlyStyle);
+                        EditorGUILayout.EndHorizontal();
+                    }
+                }
+
+#if GAME_CONFIG
+                if (script.gameConfig != null)
+                {
+                    GUILayout.Space(8);
+                    GUILayout.Label("GAME CONFIG", sectionStyle);
+                    DrawDivider();
+                    GUILayout.Space(4);
+                    DrawConfigFields(script.gameConfig);
+                }
+#endif
 
             }, colTextMuted);
 
@@ -380,6 +413,36 @@ namespace VaroniaBackOffice
 
         void DrawSectionLabel(string text) =>
             GUILayout.Label(text, sectionStyle);
+
+        /// <summary>
+        /// Affiche tous les champs publics d'instance d'un objet (typiquement GlobalConfig ou GameConfig)
+        /// en read-only avec leur nom et leur valeur courante.
+        /// </summary>
+        void DrawConfigFields(object obj)
+        {
+            if (obj == null) return;
+
+            var type = obj.GetType();
+            var fields = type.GetFields(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Instance);
+
+            foreach (var f in fields)
+            {
+                EditorGUILayout.BeginHorizontal();
+                GUILayout.Label(f.Name, fieldLabelStyle, GUILayout.Width(180));
+
+                object val;
+                try { val = f.GetValue(obj); } catch { val = null; }
+                string display = val != null ? val.ToString() : "null";
+
+                using (new EditorGUI.DisabledScope(true))
+                {
+                    EditorGUILayout.SelectableLabel(display, readOnlyStyle, GUILayout.Height(EditorGUIUtility.singleLineHeight));
+                }
+
+                EditorGUILayout.EndHorizontal();
+                GUILayout.Space(1);
+            }
+        }
 
         void DrawDivider()
         {

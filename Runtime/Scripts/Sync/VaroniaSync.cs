@@ -81,7 +81,7 @@ namespace VaroniaBackOffice
             }
 
             _instance = Instantiate(boundaryPrefab, transform);
-            _instance.transform.localPosition = new Vector3(0,0.1f,0);
+            _instance.transform.localPosition = new Vector3(0,0,0);
             if (startBoundaryInactive)
                 _instance.SetActive(false);
             

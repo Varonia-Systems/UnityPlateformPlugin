@@ -11,9 +11,7 @@ using Newtonsoft.Json.Linq;
 using UnityEngine;
 using Valve.VR;
 
-#if STEAMVR_ENABLED
-using Valve.VR;
-#endif
+
 
 namespace VaroniaBackOffice
 {
@@ -24,7 +22,7 @@ namespace VaroniaBackOffice
     public class VaroniaLatencyChart : MonoBehaviour
     {
 
-#if STEAMVR_ENABLED
+
 
         // ─── ALVR Statistics ──────────────────────────────────────────────────────
 
@@ -199,16 +197,11 @@ namespace VaroniaBackOffice
         {
             yield return new WaitForSeconds(2);
 
-            CVRSystem vr = SteamVRBridge.GetSystem();
-            if (vr == null) Destroy(this);
-
-            var sb = new StringBuilder(256);
-            ETrackedPropertyError err = ETrackedPropertyError.TrackedProp_Success;
-            vr.GetStringTrackedDeviceProperty(0, ETrackedDeviceProperty.Prop_ModelNumber_String, sb, 256, ref err);
-            string headsetName = sb.Length > 0 ? sb.ToString() : "—";
-
-            if (headsetName != "Miramar" && headsetName != "Oculus Quest2")
+            if (!GlobalConfig.IsPico4Ultra())
+            {
                 Destroy(this);
+                yield break;
+            }
 
             EnsureRT();
             StartWebSocket();
@@ -683,7 +676,7 @@ namespace VaroniaBackOffice
         private void OnMovieChanged()
         {
             if (BackOfficeVaronia.Instance != null)
-                show = BackOfficeVaronia.Instance.config.hideMode == 0;
+                show = BackOfficeVaronia.Instance.config.HideMode == 0;
         }
 
         private void OnGUI()
@@ -896,6 +889,6 @@ namespace VaroniaBackOffice
             return t;
         }
 
-#endif
+
     }
 }

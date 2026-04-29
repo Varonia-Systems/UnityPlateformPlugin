@@ -9,7 +9,7 @@ using UnityEngine;
 
 namespace VaroniaBackOffice
 {
-    public class SpatialConfigReflectionEditor : EditorWindow
+    public partial class SpatialConfigReflectionEditor : EditorWindow
     {
         // ─── State ────────────────────────────────────────────────────────────────
         private object      _configObj;
@@ -17,6 +17,7 @@ namespace VaroniaBackOffice
         private string      _savePath;
         private bool        _isDirty;
         private Vector2     _scroll;
+        private int         _activeTab; // 0 = Editor, 1 = JSON
 
         // Extra fields (JSON keys not present in the class)
         private readonly Dictionary<string, JToken> _extraFields = new Dictionary<string, JToken>();
@@ -85,7 +86,7 @@ namespace VaroniaBackOffice
         public static void ShowWindow()
         {
             var w = GetWindow<SpatialConfigReflectionEditor>("SpatialConfig");
-            w.minSize = new Vector2(440, 540);
+            w.minSize = new Vector2(960, 800);
         }
 
         // ─── Lifecycle ────────────────────────────────────────────────────────────
@@ -96,7 +97,18 @@ namespace VaroniaBackOffice
             VaroniaProjectSettings.ApplyForceDisableBoundary();
             Refresh();
         }
-        private void OnFocus() => Refresh();
+        private void OnFocus()
+        {
+            // Don't blow away unsaved edits when window regains focus
+            // (e.g. after the color picker / system dialogs / external IDE).
+            if (_isDirty) return;
+            Refresh();
+        }
+
+        private void OnDisable()
+        {
+            if (_orthoTex != null) { DestroyImmediate(_orthoTex); _orthoTex = null; }
+        }
 
         // ── Texture helpers ───────────────────────────────────────────────────────
 
@@ -245,6 +257,7 @@ namespace VaroniaBackOffice
             _configObj   = null;
             _knownFields = null;
             _extraFields.Clear();
+            _multiplierTracked = false; // re-baseline against newly loaded Multiplier
 
             Type configType = null;
             foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
@@ -324,6 +337,7 @@ namespace VaroniaBackOffice
         private void OnGUI()
         {
             BuildStyles();
+            HandleEditorEvents();
 
             EditorGUI.DrawRect(new Rect(0, 0, position.width, position.height), colBg);
 
@@ -377,78 +391,72 @@ namespace VaroniaBackOffice
                 return;
             }
 
+            DrawTabBar();
+            EditorGUILayout.Space(6);
+
             _scroll = EditorGUILayout.BeginScrollView(_scroll, GUIStyle.none, GUIStyle.none);
 
-            // ── Editor Settings card ──
-            DrawCard(() =>
+            if (_activeTab == 0)
             {
-                DrawSectionLabel("PARAMÈTRES ÉDITEUR");
-                EditorGUILayout.Space(4);
-                DrawDivider();
-                EditorGUILayout.Space(6);
-
-                EditorGUI.BeginChangeCheck();
-                bool forceDisable = EditorPrefs.GetBool(PrefForceDisableBoundary, false);
-                bool newForce = EditorGUILayout.ToggleLeft(" Ignorer l'alerte 'Hors Zone' (3D Boundary)", forceDisable, fieldLabelStyle);
-                if (EditorGUI.EndChangeCheck())
-                {
-                    EditorPrefs.SetBool(PrefForceDisableBoundary, newForce);
-                    VaroniaProjectSettings.ApplyForceDisableBoundary();
-                }
-                EditorGUILayout.Space(2);
-            }, colWarn);
-
-            EditorGUILayout.Space(8);
-
-            // ── Known fields card ──
-            DrawCard(() =>
-            {
-                DrawSectionLabel("CHAMPS CONNUS  ·  RÉFLEXION");
-                EditorGUILayout.Space(4);
-                DrawDivider();
-                EditorGUILayout.Space(6);
-                DrawKnownFields();
-            }, colAccent);
-
-            EditorGUILayout.Space(8);
-
-            // ── 2D Preview card ──
-            DrawCard(() =>
-            {
-                DrawSectionLabel("APERÇU 2D  ·  BOUNDARIES");
-                EditorGUILayout.Space(4);
-                DrawDivider();
-                EditorGUILayout.Space(6);
-                DrawBoundaryPreview();
-                EditorGUILayout.Space(2);
-            }, new Color(0.40f, 0.65f, 1f, 1f));
-
-            EditorGUILayout.Space(8);
-
-            // ── Extra fields card ──
-            if (_extraFields.Count > 0)
-            {
+                // ── Editor Settings card ──
                 DrawCard(() =>
                 {
-                    DrawSectionLabel("CHAMPS SUPPLÉMENTAIRES  ·  JSON UNIQUEMENT");
+                    DrawSectionLabel("PARAMÈTRES ÉDITEUR");
                     EditorGUILayout.Space(4);
                     DrawDivider();
                     EditorGUILayout.Space(6);
-                    DrawExtraFields();
+
+                    EditorGUI.BeginChangeCheck();
+                    bool forceDisable = EditorPrefs.GetBool(PrefForceDisableBoundary, false);
+                    bool newForce = EditorGUILayout.ToggleLeft(" Ignorer l'alerte 'Hors Zone' (3D Boundary)", forceDisable, fieldLabelStyle);
+                    if (EditorGUI.EndChangeCheck())
+                    {
+                        EditorPrefs.SetBool(PrefForceDisableBoundary, newForce);
+                        VaroniaProjectSettings.ApplyForceDisableBoundary();
+                    }
+                    EditorGUILayout.Space(2);
                 }, colWarn);
 
                 EditorGUILayout.Space(8);
-            }
 
-            // ── Add field card ──
-            DrawCard(() =>
+                // ── 2D Editor + Inspector card ──
+                DrawCard(() =>
+                {
+                    DrawSectionLabel("ÉDITEUR 2D  ·  BOUNDARIES");
+                    EditorGUILayout.Space(4);
+                    DrawDivider();
+                    EditorGUILayout.Space(6);
+                    DrawEditor2DAndInspector();
+                    EditorGUILayout.Space(2);
+                }, new Color(0.40f, 0.65f, 1f, 1f));
+            }
+            else // _activeTab == 1 (JSON)
             {
-                DrawSectionLabel("AJOUTER UN CHAMP");
-                EditorGUILayout.Space(4);
-                DrawDivider();
-                EditorGUILayout.Space(6);
-                DrawAddField();
-            }, colTextMuted);
+                // ── Extra fields card ──
+                if (_extraFields.Count > 0)
+                {
+                    DrawCard(() =>
+                    {
+                        DrawSectionLabel("CHAMPS SUPPLÉMENTAIRES  ·  JSON UNIQUEMENT");
+                        EditorGUILayout.Space(4);
+                        DrawDivider();
+                        EditorGUILayout.Space(6);
+                        DrawExtraFields();
+                    }, colWarn);
+
+                    EditorGUILayout.Space(8);
+                }
+
+                // ── Add field card ──
+                DrawCard(() =>
+                {
+                    DrawSectionLabel("AJOUTER UN CHAMP");
+                    EditorGUILayout.Space(4);
+                    DrawDivider();
+                    EditorGUILayout.Space(6);
+                    DrawAddField();
+                }, colTextMuted);
+            }
 
             EditorGUILayout.EndScrollView();
 
@@ -457,12 +465,55 @@ namespace VaroniaBackOffice
             EditorGUILayout.Space(8);
         }
 
+        // ─── Tabs ─────────────────────────────────────────────────────────────────
+
+        private void DrawTabBar()
+        {
+            EditorGUILayout.BeginHorizontal();
+            GUILayout.Space(16);
+            DrawTabButton("ÉDITEUR", 0);
+            GUILayout.Space(2);
+            int extraCount = _extraFields.Count;
+            DrawTabButton(extraCount > 0 ? $"JSON  ({extraCount})" : "JSON", 1);
+            GUILayout.FlexibleSpace();
+            GUILayout.Space(16);
+            EditorGUILayout.EndHorizontal();
+        }
+
+        private void DrawTabButton(string label, int idx)
+        {
+            bool active = _activeTab == idx;
+            var st = new GUIStyle
+            {
+                fontSize  = 11,
+                fontStyle = FontStyle.Bold,
+                alignment = TextAnchor.MiddleCenter,
+                padding   = new RectOffset(14, 14, 6, 6),
+                margin    = new RectOffset(0, 0, 0, 0),
+                normal    = {
+                    textColor  = active ? colAccent : colTextSecond,
+                    background = active ? texAccentDim : texBtn,
+                },
+                hover    = { textColor = Color.white, background = texBtnHover },
+                border   = new RectOffset(5, 5, 5, 5),
+            };
+            if (GUILayout.Button(label, st, GUILayout.Height(26), GUILayout.MinWidth(110)))
+            {
+                _activeTab = idx;
+                _scroll = Vector2.zero;
+            }
+        }
+
         // ─── Known fields ─────────────────────────────────────────────────────────
 
         private void DrawKnownFields()
         {
             foreach (var field in _knownFields)
+            {
+                // Boundaries are edited via the 2D viewport — skip here.
+                if (field.Name == "Boundaries") continue;
                 DrawReflectedField(field);
+            }
         }
 
         private void DrawReflectedField(FieldInfo field)
@@ -494,9 +545,29 @@ namespace VaroniaBackOffice
                 int next   = EditorGUILayout.Popup(Mathf.Max(cur, 0), names);
                 newValue   = values.GetValue(next);
             }
+            else if (type.Name == "Vector3_")
+            {
+                var v = (value != null)
+                    ? new Vector3(GetField(value, "x"), GetField(value, "y"), GetField(value, "z"))
+                    : Vector3.zero;
+                Vector3 nv = EditorGUILayout.Vector3Field(GUIContent.none, v);
+                if (value == null) value = Activator.CreateInstance(type);
+                SetField(value, "x", nv.x); SetField(value, "y", nv.y); SetField(value, "z", nv.z);
+                newValue = value;
+            }
+            else if (type.Name == "Vector4_")
+            {
+                var v = (value != null)
+                    ? new Vector4(GetField(value, "x"), GetField(value, "y"), GetField(value, "z"), GetField(value, "w"))
+                    : Vector4.zero;
+                Vector4 nv = EditorGUILayout.Vector4Field(GUIContent.none, v);
+                if (value == null) value = Activator.CreateInstance(type);
+                SetField(value, "x", nv.x); SetField(value, "y", nv.y); SetField(value, "z", nv.z); SetField(value, "w", nv.w);
+                newValue = value;
+            }
             else
             {
-                // Complex type (Vector3_, List<Boundary_>, etc.) — show JSON preview, read-only
+                // Complex type (List<Boundary_>, etc.) — show JSON preview, read-only
                 string preview = value != null
                     ? JsonConvert.SerializeObject(value, Formatting.None)
                     : "null";
@@ -513,6 +584,17 @@ namespace VaroniaBackOffice
                 field.SetValue(_configObj, newValue);
                 _isDirty = true;
             }
+        }
+
+        private static float GetField(object obj, string name)
+        {
+            var f = obj.GetType().GetField(name);
+            return f != null ? Convert.ToSingle(f.GetValue(obj)) : 0f;
+        }
+        private static void SetField(object obj, string name, float value)
+        {
+            var f = obj.GetType().GetField(name);
+            if (f != null) f.SetValue(obj, value);
         }
 
         // ─── Extra fields ─────────────────────────────────────────────────────────
@@ -675,161 +757,6 @@ namespace VaroniaBackOffice
             File.WriteAllText(_savePath, jObj.ToString(Formatting.Indented));
             _isDirty = false;
             Debug.Log($"[SpatialConfig Editor] Sauvegardé → {_savePath}");
-        }
-
-        // ─── 2D Boundary Preview ──────────────────────────────────────────────────
-
-        private void DrawBoundaryPreview()
-        {
-            if (_configObj == null) return;
-            var spatial = (Spatial)_configObj;
-
-            bool hasData = spatial.Boundaries != null && spatial.Boundaries.Count > 0;
-
-            Rect previewRect = GUILayoutUtility.GetRect(
-                GUIContent.none, GUIStyle.none,
-                GUILayout.ExpandWidth(true),
-                GUILayout.Height(hasData ? 290f : 52f)
-            );
-
-            EditorGUI.DrawRect(previewRect, new Color(0.07f, 0.07f, 0.09f));
-
-            if (!hasData)
-            {
-                var noDataStyle = new GUIStyle
-                {
-                    fontSize  = 10,
-                    alignment = TextAnchor.MiddleCenter,
-                    normal    = { textColor = colTextMuted },
-                };
-                GUI.Label(previewRect, "Aucune boundary à afficher", noDataStyle);
-                return;
-            }
-
-            // ── Compute world bounds ──────────────────────────────────────────────
-            float minX = float.MaxValue, maxX = float.MinValue;
-            float minZ = float.MaxValue, maxZ = float.MinValue;
-
-            foreach (var b in spatial.Boundaries)
-            {
-                if (b?.Points == null) continue;
-                foreach (var p in b.Points)
-                {
-                    if (p == null) continue;
-                    if (p.x < minX) minX = p.x; if (p.x > maxX) maxX = p.x;
-                    if (p.z < minZ) minZ = p.z; if (p.z > maxZ) maxZ = p.z;
-                }
-            }
-
-            if (spatial.SyncPos != null)
-            {
-                if (spatial.SyncPos.x < minX) minX = spatial.SyncPos.x;
-                if (spatial.SyncPos.x > maxX) maxX = spatial.SyncPos.x;
-                if (spatial.SyncPos.z < minZ) minZ = spatial.SyncPos.z;
-                if (spatial.SyncPos.z > maxZ) maxZ = spatial.SyncPos.z;
-            }
-
-            if (minX >= maxX || minZ >= maxZ) return;
-
-            float padX = (maxX - minX) * 0.10f;
-            float padZ = (maxZ - minZ) * 0.10f;
-            minX -= padX; maxX += padX;
-            minZ -= padZ; maxZ += padZ;
-
-            float worldW = maxX - minX;
-            float worldH = maxZ - minZ;
-
-            // ── Fit into preview rect ─────────────────────────────────────────────
-            float inset  = 14f;
-            float drawW  = previewRect.width  - inset * 2f;
-            float drawH  = previewRect.height - inset * 2f;
-            float scale  = Mathf.Min(drawW / worldW, drawH / worldH);
-
-            float ox = previewRect.x + inset + (drawW - worldW * scale) * 0.5f;
-            float oy = previewRect.y + inset + (drawH - worldH * scale) * 0.5f;
-
-            Vector3 ToScreen(Vector3_ p) =>
-                new Vector3(ox + (p.x - minX) * scale, oy + (maxZ - p.z) * scale, 0f);
-
-            if (Event.current.type != EventType.Repaint) return;
-
-            // ── Grid ─────────────────────────────────────────────────────────────
-            float fitW = worldW * scale;
-            float fitH = worldH * scale;
-
-            Handles.color = new Color(1f, 1f, 1f, 0.04f);
-            const int gridN = 8;
-            for (int i = 0; i <= gridN; i++)
-            {
-                float tx = ox + fitW * i / gridN;
-                float ty = oy + fitH * i / gridN;
-                Handles.DrawLine(new Vector3(tx, oy,       0), new Vector3(tx, oy + fitH, 0));
-                Handles.DrawLine(new Vector3(ox, ty,       0), new Vector3(ox + fitW, ty, 0));
-            }
-
-            // ── Boundaries ───────────────────────────────────────────────────────
-            foreach (var boundary in spatial.Boundaries)
-            {
-                if (boundary?.Points == null || boundary.Points.Count < 2) continue;
-
-                var   bc  = boundary.BoundaryColor;
-                Color col = bc != null ? new Color(bc.x, bc.y, bc.z) : Color.green;
-                float lw  = boundary.MainBoundary ? 2.5f : 1.5f;
-
-                // Outline
-                Handles.color = col;
-                var pts = boundary.Points;
-                for (int i = 0; i < pts.Count; i++)
-                {
-                    if (pts[i] == null || pts[(i + 1) % pts.Count] == null) continue;
-                    Handles.DrawAAPolyLine(lw, ToScreen(pts[i]), ToScreen(pts[(i + 1) % pts.Count]));
-                }
-
-                // Vertex dots
-                Handles.color = new Color(col.r, col.g, col.b, 0.55f);
-                foreach (var p in pts)
-                {
-                    if (p == null) continue;
-                    Handles.DrawSolidDisc(ToScreen(p), Vector3.forward, 2.5f);
-                }
-
-                // Obstacles
-                if (boundary.Obstacles != null)
-                {
-                    foreach (var obs in boundary.Obstacles)
-                    {
-                        if (obs?.Position == null) continue;
-                        Handles.color = new Color(1f, 0.55f, 0.12f, 0.85f);
-                        float r = Mathf.Max(4f, obs.Scale * scale * 0.3f);
-                        Handles.DrawWireDisc(ToScreen(obs.Position), Vector3.forward, r);
-                        Handles.DrawSolidDisc(ToScreen(obs.Position), Vector3.forward, 2f);
-                    }
-                }
-            }
-
-            // ── SyncPos cross ────────────────────────────────────────────────────
-            if (spatial.SyncPos != null)
-            {
-                var  sp = ToScreen(spatial.SyncPos);
-                float cs = 8f;
-                Handles.color = colAccent;
-                Handles.DrawAAPolyLine(2f, sp - new Vector3(cs, 0), sp + new Vector3(cs, 0));
-                Handles.DrawAAPolyLine(2f, sp - new Vector3(0, cs), sp + new Vector3(0, cs));
-                Handles.DrawWireDisc(sp, Vector3.forward, 4.5f);
-            }
-
-            // ── Legend ───────────────────────────────────────────────────────────
-            var legendStyle = new GUIStyle
-            {
-                fontSize  = 9,
-                alignment = TextAnchor.LowerRight,
-                normal    = { textColor = colTextMuted },
-            };
-            GUI.Label(
-                new Rect(previewRect.x, previewRect.yMax - 18f, previewRect.width - 6f, 16f),
-                $"{spatial.Boundaries.Count} boundar{(spatial.Boundaries.Count > 1 ? "ies" : "y")}",
-                legendStyle
-            );
         }
 
         // ─── Helpers ──────────────────────────────────────────────────────────────

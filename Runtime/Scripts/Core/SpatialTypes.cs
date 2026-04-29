@@ -50,6 +50,7 @@ namespace VaroniaBackOffice
         public bool            MainBoundary;
         public bool            Reverse;
         public float           DisplayDistance;
+        public bool            HideLineFar;
     }
 
     public class Spatial

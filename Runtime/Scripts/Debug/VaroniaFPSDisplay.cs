@@ -360,7 +360,7 @@ namespace VaroniaBackOffice
         private void OnMovieChanged()
         {
             if (BackOfficeVaronia.Instance != null)
-                show = BackOfficeVaronia.Instance.config.hideMode == 0;
+                show = BackOfficeVaronia.Instance.config.HideMode == 0;
 
             // Reset session stats
             _sessionDtSum      = 0.0;

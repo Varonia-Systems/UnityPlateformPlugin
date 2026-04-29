@@ -1,5 +1,11 @@
+using System.Collections.Generic;
 using Newtonsoft.Json;
 using UnityEngine;
+using UnityEngine.Serialization;
+using UnityEngine.XR;
+#if STEAMVR_ENABLED
+using Valve.VR;
+#endif
 
 namespace VaroniaBackOffice
 {
@@ -51,7 +57,7 @@ namespace VaroniaBackOffice
         public string PlayerName = "Varonia Player";
 
 
-        public int hideMode;
+        [FormerlySerializedAs("hideMode")] public int HideMode;
 
 
         public bool Direct;
@@ -62,6 +68,85 @@ namespace VaroniaBackOffice
         
         [Header("Controller")]
         public Controller Controller = 0;
+
+        [Header("VR")]
+        /// <summary>
+        /// Manual override for the detected VR headset name.
+        /// When empty, the name is auto-detected via OpenVR (<c>Prop_ModelNumber_String</c>)
+        /// or OpenXR (<c>InputDevices</c>). When set, it overrides detection AND drives
+        /// which debug latency chart is shown ("Pico 4 Ultra" → VSVR/ALVR chart,
+        /// "Vive Focus 3" → VBS chart).
+        /// </summary>
+        public string HeadsetName = "";
+
+        // ─── Headset resolution ───────────────────────────────────────────────────
+
+        /// <summary>
+        /// Returns the effective headset name: <see cref="HeadsetName"/> if set,
+        /// otherwise auto-detected from OpenVR / OpenXR.
+        /// </summary>
+        public static string ResolveHeadsetName()
+        {
+            var cfg = BackOfficeVaronia.Instance != null ? BackOfficeVaronia.Instance.config : null;
+            if (cfg != null && !string.IsNullOrWhiteSpace(cfg.HeadsetName))
+                return cfg.HeadsetName.Trim();
+            return AutoDetectHeadsetName();
+        }
+
+        private static string AutoDetectHeadsetName()
+        {
+#if STEAMVR_ENABLED
+            try
+            {
+                var vr = SteamVRBridge.GetSystem();
+                if (vr != null)
+                {
+                    var sb  = new System.Text.StringBuilder(256);
+                    var err = ETrackedPropertyError.TrackedProp_Success;
+                    vr.GetStringTrackedDeviceProperty(
+                        0, ETrackedDeviceProperty.Prop_ModelNumber_String, sb, 256, ref err);
+                    if (sb.Length > 0)
+                        return RemapKnownAlias(sb.ToString());
+                }
+            }
+            catch { }
+#endif
+            var headsets = new List<InputDevice>();
+            InputDevices.GetDevicesWithCharacteristics(InputDeviceCharacteristics.HeadMounted, headsets);
+            if (headsets.Count > 0)
+            {
+                var hmd = headsets[0];
+                string manufacturer = (hmd.manufacturer ?? "").Trim();
+                string name         = (hmd.name ?? "").Trim();
+                if (!string.IsNullOrEmpty(manufacturer) &&
+                    !name.StartsWith(manufacturer, System.StringComparison.OrdinalIgnoreCase))
+                    return $"{manufacturer} {name}";
+                if (!string.IsNullOrEmpty(name))
+                    return name;
+            }
+            return "—";
+        }
+
+        private static string RemapKnownAlias(string raw)
+        {
+            if (raw == "Miramar" || raw == "Oculus Quest2") return "Pico 4 Ultra";
+            if (raw == "Vive VBStreaming Focus3")           return "Vive Focus 3";
+            return raw;
+        }
+
+        /// <summary>True if the resolved headset is a Pico 4 Ultra (VSVR / ALVR streaming).</summary>
+        public static bool IsPico4Ultra()
+        {
+            string n = ResolveHeadsetName();
+            return n == "Pico 4 Ultra" || n == "Miramar" || n == "Oculus Quest2";
+        }
+
+        /// <summary>True if the resolved headset is a Vive Focus 3 (VBS streaming).</summary>
+        public static bool IsViveFocus3()
+        {
+            string n = ResolveHeadsetName();
+            return n == "Vive Focus 3" || n == "Vive VBStreaming Focus3";
+        }
 
         /// <summary>
         /// Deserializes a JSON string into a GlobalConfig object using Newtonsoft.Json.

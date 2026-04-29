@@ -1,6 +1,5 @@
 using System;
 using System.Collections;
-using System.Text;
 using UnityEngine;
 #if STEAMVR_ENABLED
 using Valve.VR;
@@ -118,16 +117,12 @@ public class VBSLatencyChart : MonoBehaviour
         yield return new WaitForSeconds(2);
         if (_dead) yield break;
 
+        if (!GlobalConfig.IsViveFocus3()) { Destroy(this); yield break; }
+
         _vrSystem = SteamVRBridge.GetSystem();
         if (_vrSystem == null) { Destroy(this); yield break; }
 
-        var sb = new StringBuilder(256);
-        ETrackedPropertyError err = ETrackedPropertyError.TrackedProp_Success;
-        _vrSystem.GetStringTrackedDeviceProperty(0, ETrackedDeviceProperty.Prop_ModelNumber_String, sb, 256, ref err);
-        _headsetName = sb.Length > 0 ? sb.ToString() : "—";
-
-        if (_headsetName != "Vive VBStreaming Focus3") { Destroy(this); yield break; }
-
+        _headsetName = GlobalConfig.ResolveHeadsetName();
         _cachedHeader = string.Concat("VBS MONITOR • ", _headsetName);
 
         EnsureRT();

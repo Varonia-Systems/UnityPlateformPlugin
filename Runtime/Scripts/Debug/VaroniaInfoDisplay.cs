@@ -1,9 +1,6 @@
 using System.Collections;
 using uPLibrary.Networking.M2Mqtt;
 using UnityEngine;
-#if STEAMVR_ENABLED
-using Valve.VR;
-#endif
 #if ENABLE_INPUT_SYSTEM
 using UnityEngine.InputSystem;
 #endif
@@ -74,36 +71,8 @@ namespace VaroniaBackOffice
             yield return new WaitForSeconds(0.1f);
             BackOfficeVaronia.RaiseMovieChanged();
             yield return new WaitForSeconds(1f);
-           
-#if STEAMVR_ENABLED
-            CVRSystem vr = SteamVRBridge.GetSystem();
-            if (vr != null)
-            {
-                var sb = new System.Text.StringBuilder(256);
-                ETrackedPropertyError err = ETrackedPropertyError.TrackedProp_Success;
-                vr.GetStringTrackedDeviceProperty(0, ETrackedDeviceProperty.Prop_ModelNumber_String, sb, 256, ref err);
-                _headsetName = sb.Length > 0 ? sb.ToString() : "—";
-                
-                if(_headsetName == "Miramar" || _headsetName == "Oculus Quest2")
-                {
-                    _headsetName = "Pico 4 Ultra";
-                }
-                
-                if(_headsetName == "Vive VBStreaming Focus3")
-                {
-                    _headsetName = "Vive Focus 3";
-                }
-            }
-            else
-            {
-  #endif
-                var headsets = new System.Collections.Generic.List<UnityEngine.XR.InputDevice>();
-                UnityEngine.XR.InputDevices.GetDevicesWithCharacteristics(
-                    UnityEngine.XR.InputDeviceCharacteristics.HeadMounted, headsets);
-                _headsetName = headsets.Count > 0 ? headsets[0].name : "—";
-#if STEAMVR_ENABLED
-            }
-#endif
+
+            _headsetName = GlobalConfig.ResolveHeadsetName();
         }
 
         
@@ -129,13 +98,13 @@ namespace VaroniaBackOffice
             {
                 if (BackOfficeVaronia.Instance != null)
                 {
-                    BackOfficeVaronia.Instance.config.hideMode ++;
+                    BackOfficeVaronia.Instance.config.HideMode ++;
                     
-                    if(BackOfficeVaronia.Instance.config.hideMode > 2)
-                        BackOfficeVaronia.Instance.config.hideMode = 0;
+                    if(BackOfficeVaronia.Instance.config.HideMode > 2)
+                        BackOfficeVaronia.Instance.config.HideMode = 0;
                     
                     BackOfficeVaronia.RaiseMovieChanged();
-                    Debug.Log($"[VaroniaInfoDisplay] Hide mode: {BackOfficeVaronia.Instance.config.hideMode}");
+                    Debug.Log($"[VaroniaInfoDisplay] Hide mode: {BackOfficeVaronia.Instance.config.HideMode}");
                 }
             }
         }
@@ -156,7 +125,7 @@ namespace VaroniaBackOffice
             {
                 var mode = BackOfficeVaronia.Instance.config.DeviceMode;
                 bool isSpectator = mode == DeviceMode.Server_Spectator || mode == DeviceMode.Client_Spectator;
-                show = !isSpectator && BackOfficeVaronia.Instance.config.hideMode == 0;
+                show = !isSpectator && BackOfficeVaronia.Instance.config.HideMode == 0;
             }
         }
 
