@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Collections.Generic;
 using UnityEngine;
 using VaroniaBackOffice;
 
@@ -6,6 +7,26 @@ namespace VBO_Ultimate.Runtime.Scripts.Input
 {
     public class VaroniaWeaponTracking : MonoBehaviour
     {
+        // ─── Registry global (pour TrackingSuppressionZone & autres) ──────────────
+        // HashSet<> alloc-free pour iterate quand on cherche les armes actives.
+        private static readonly HashSet<VaroniaWeaponTracking> s_active = new HashSet<VaroniaWeaponTracking>();
+        public static IReadOnlyCollection<VaroniaWeaponTracking> ActiveInstances => s_active;
+
+        /// <summary>
+        /// Override externe pour forcer le tracking en "lost" indépendamment du
+        /// hardware. Utilisé par <see cref="TrackingSuppressionZone"/> (holster, caisse,
+        /// underwater, etc.). Plusieurs sources peuvent s'additionner via le counter
+        /// : appelle <see cref="AddForceLost"/>/<see cref="RemoveForceLost"/>.
+        /// </summary>
+        public bool ExternalForceLost => _forceLostCounter > 0;
+        private int _forceLostCounter;
+
+        public void AddForceLost()    { _forceLostCounter++; }
+        public void RemoveForceLost() { if (_forceLostCounter > 0) _forceLostCounter--; }
+
+        private void OnEnable()  { s_active.Add(this); }
+        private void OnDisable() { s_active.Remove(this); _forceLostCounter = 0; }
+
         [Header("Weapon Index")]
         [Tooltip("Index de cette arme dans VaroniaInput (0 = première arme, 1 = deuxième, etc.).")]
         public int weaponIndex = 0;
@@ -61,7 +82,33 @@ namespace VBO_Ultimate.Runtime.Scripts.Input
             else
             {
                 yield return new WaitUntil(() => BackOfficeVaronia.Instance != null && BackOfficeVaronia.Instance.config != null);
-                controllerId = (int)BackOfficeVaronia.Instance.config.Controller;
+
+                // Nouveau système multi-armes : on prend le binding à l'index correspondant.
+                // Si la liste est vide, GetWeaponBinding retombe sur l'ancien Controller (arme 0).
+                var binding = BackOfficeVaronia.Instance.config.GetWeaponBinding(weaponIndex);
+                if (binding != null)
+                {
+                    controllerId = (int)binding.Controller;
+
+                    // Si ForceSteamId est défini (>= 0), on force le tracking SteamVR par index.
+                    // Ça écrase les overrides Inspector au runtime — ApplyTrackerSettings les utilisera.
+                    if (binding.ForceSteamId >= 0)
+                    {
+                        overrideAutoFind        = true;
+                        overriddenBackend       = ItemTracking.TrackingBackend.SteamVR;
+#if STEAMVR_ENABLED
+                        overriddenTrackerIndex  = binding.ForceSteamId;
+                        Debug.Log($"[VaroniaWeaponTracking] weaponIndex={weaponIndex} : override SteamVR trackerIndex={binding.ForceSteamId} depuis GlobalConfig.Devices.");
+#else
+                        Debug.LogWarning($"[VaroniaWeaponTracking] weaponIndex={weaponIndex} : ForceSteamId={binding.ForceSteamId} défini mais STEAMVR_ENABLED off — ignoré.");
+#endif
+                    }
+                }
+                else
+                {
+                    Debug.LogWarning($"[VaroniaWeaponTracking] Aucun WeaponBinding pour weaponIndex={weaponIndex} — vérifie GlobalConfig.Devices.");
+                    controllerId = (int)BackOfficeVaronia.Instance.config.Controller;
+                }
             }
 
             _WeaponInfo entry = VaroniaWeapon.Instance.GetWeaponById(controllerId);
@@ -71,9 +118,13 @@ namespace VBO_Ultimate.Runtime.Scripts.Input
                 GameObject spawned = Instantiate(entry.prefabWeapon, transform.position, transform.rotation, transform);
                 Debug.Log($"#[VaroniaWeaponTracking] Weapon spawned for Controller ID: {controllerId}");
 
-                
                 weap = spawned.GetComponent<_Weapon>();
-                
+
+                // Bind le _WeaponInfo utilisé pour ce spawn → résout le cas "un même
+                // prefab référencé par plusieurs SOs". Le _Weapon attend cet appel
+                // (sinon il déclenche un fallback warning au frame suivant).
+                if (weap != null) weap.Init(entry);
+
                 if (trackerFollower == null)
                     trackerFollower = spawned.GetComponentInChildren<ItemTracking>();
 
@@ -118,7 +169,12 @@ namespace VBO_Ultimate.Runtime.Scripts.Input
         private void Update()
         {
             if (trackerFollower != null)
-                trackingLost = !trackerFollower.isTracking;
+            {
+                trackingLost = !trackerFollower.isTracking || ExternalForceLost;
+                // Propage l'override vers ItemTracking pour affichage dans son custom editor
+                // (pas d'effet runtime — purement visuel/diagnostic).
+                trackerFollower.externalForceLost = ExternalForceLost;
+            }
         }
     }
 }

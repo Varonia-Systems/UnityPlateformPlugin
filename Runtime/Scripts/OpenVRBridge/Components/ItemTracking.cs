@@ -85,6 +85,15 @@ namespace VaroniaBackOffice
         public string foundModel = "";
         public string foundSerial = "";
 
+        /// <summary>
+        /// Flag externe (poussé chaque frame par <c>VaroniaWeaponTracking</c>) qui indique
+        /// qu'une <c>TrackingSuppressionZone</c> a marqué cette arme comme "perdue" alors
+        /// que le hardware tracking est toujours OK. Purement informatif côté ItemTracking
+        /// — n'arrête PAS l'application de la pose, on continue à update le transform
+        /// pour pouvoir redégainer. Affiché dans le custom editor d'ItemTracking.
+        /// </summary>
+        [System.NonSerialized] public bool externalForceLost = false;
+
         [Header("Événements")]
         public UnityEvent OnTrackingLost;
         public UnityEvent OnTrackingRestored;

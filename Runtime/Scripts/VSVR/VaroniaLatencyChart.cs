@@ -1,3 +1,10 @@
+// VaroniaLatencyChart — chart ALVR temps réel via WebSocket.
+//
+// IMGUI par défaut, UI Toolkit avec define VBO_UITOOLKIT_OVERLAYS.
+// Toggle : Project Settings → Varonia Back Office → Debug Overlays Rendering.
+// Note : la rendu GL+RenderTexture du chart est partagé entre les 2 versions
+// (déjà optimisé). Seul l'affichage du RT final + les labels change.
+
 using System;
 using System.Collections;
 using System.Collections.Generic;
@@ -9,7 +16,10 @@ using System.Threading.Tasks;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using UnityEngine;
-using Valve.VR;
+#if VBO_UITOOLKIT_OVERLAYS
+using UnityEngine.UIElements;
+#endif
+
 
 
 
@@ -148,6 +158,21 @@ namespace VaroniaBackOffice
         private string _cachedAvgLost      = "—";
         private string _cachedAvgLineLabel = "";
 
+        // Per-stat "last int key" memo : on évite de reconstruire la string si
+        // (long)value n'a pas changé entre 2 ticks 10Hz. Quand la latence est
+        // stable autour d'une même valeur entière, → 0 alloc.
+        // Sentinelle long.MinValue = "jamais encore calculé".
+        private long _lastKeyStatNet = long.MinValue, _lastKeyStatTot = long.MinValue,
+                     _lastKeyStatEnc = long.MinValue, _lastKeyStatDec = long.MinValue,
+                     _lastKeyStatFps = long.MinValue;
+        private long _lastKeyAvgNet  = long.MinValue, _lastKeyAvgTot  = long.MinValue,
+                     _lastKeyAvgEnc  = long.MinValue, _lastKeyAvgDec  = long.MinValue;
+        private int  _lastKeyAvgLost = int.MinValue;
+        private long _lastKeyVsvr = long.MinValue;   // bitrate*10 (FormatF1)
+        private long _lastKeyAvg5s = long.MinValue;  // avg5s*10  (FormatF1)
+
+        private readonly StringBuilder _sbFmt = new StringBuilder(16);
+
         private Color _cachedColNet, _cachedColTot, _cachedColEnc, _cachedColDec;
         private Color _cachedAvgColNet, _cachedAvgColTot, _cachedAvgColEnc, _cachedAvgColDec;
         private bool  _cachedHasLive;
@@ -176,6 +201,47 @@ namespace VaroniaBackOffice
             long integer = (long)v;
             long frac = (long)((v - integer) * 10 + 0.5) % 10;
             return string.Concat(integer.ToString(), ".", frac.ToString());
+        }
+
+        // Sentinelle pour "valeur négative" (—) qui ne collisionne pas avec une vraie clé
+        private const long KEY_NEG = long.MinValue + 1;
+
+        /// <summary>
+        /// Retourne "Xms" si v>=0, "—" sinon. Réutilise la string cached tant que (long)v
+        /// n'a pas changé → 0 alloc en régime stable. Met à jour lastKey et lastStr in-place.
+        /// </summary>
+        private string FormatMsCached(double v, ref long lastKey, ref string lastStr)
+        {
+            if (v < 0)
+            {
+                if (lastKey != KEY_NEG) { lastKey = KEY_NEG; lastStr = "—"; }
+                return lastStr;
+            }
+            long key = (long)v;
+            if (key == lastKey) return lastStr;
+            lastKey = key;
+            _sbFmt.Length = 0;
+            _sbFmt.Append(key);
+            _sbFmt.Append("ms");
+            lastStr = _sbFmt.ToString();
+            return lastStr;
+        }
+
+        /// <summary>
+        /// Retourne "Xms FPS" (FPS = pas de suffixe). Variant sans "ms".
+        /// </summary>
+        private string FormatIntCached(double v, ref long lastKey, ref string lastStr)
+        {
+            if (v < 0)
+            {
+                if (lastKey != KEY_NEG) { lastKey = KEY_NEG; lastStr = "—"; }
+                return lastStr;
+            }
+            long key = (long)v;
+            if (key == lastKey) return lastStr;
+            lastKey = key;
+            lastStr = key.ToString();
+            return lastStr;
         }
 
         // ─────────────────────────────────────────────────────────────────────────
@@ -281,6 +347,18 @@ namespace VaroniaBackOffice
                     _rtDirty = true;
                 }
             }
+
+#if VBO_UITOOLKIT_OVERLAYS
+            // En UI Toolkit, OnGUI ne tourne pas → on déclenche le rendu RT + le push
+            // des labels ici. La rendu GL est partagé avec IMGUI, on réutilise
+            // EnsureRT/RenderToRT à l'identique.
+            if (_ready && show)
+            {
+                EnsureRT();
+                if (_rtDirty) RenderToRT();
+                UpdateLabels_UITK();
+            }
+#endif
         }
 
         private void RebuildCachedData()
@@ -289,15 +367,34 @@ namespace VaroniaBackOffice
             _cachedHasLive = live != null;
             if (!_cachedHasLive) return;
 
-            _cachedVsvrLabel = live.video_mbits_per_sec > 0
-                ? string.Concat("VSVR (", FormatF1(live.video_mbits_per_sec), " Mbps)")
-                : "VSVR";
+            // VSVR header — clé = bitrate * 10 (résolution FormatF1).
+            // Rebuild "VSVR (X.X Mbps)" only when the rounded-to-0.1 value changes.
+            if (live.video_mbits_per_sec > 0)
+            {
+                long vsvrKey = (long)(live.video_mbits_per_sec * 10.0 + 0.5);
+                if (vsvrKey != _lastKeyVsvr)
+                {
+                    _lastKeyVsvr = vsvrKey;
+                    _sbFmt.Length = 0;
+                    _sbFmt.Append("VSVR (");
+                    _sbFmt.Append(vsvrKey / 10);
+                    _sbFmt.Append('.');
+                    _sbFmt.Append(vsvrKey % 10);
+                    _sbFmt.Append(" Mbps)");
+                    _cachedVsvrLabel = _sbFmt.ToString();
+                }
+            }
+            else if (_lastKeyVsvr != KEY_NEG)
+            {
+                _lastKeyVsvr = KEY_NEG;
+                _cachedVsvrLabel = "VSVR";
+            }
 
-            _cachedStatNet = live.network_latency_ms >= 0 ? string.Concat(FormatF0(live.network_latency_ms), "ms") : "—";
-            _cachedStatTot = live.total_latency_ms   >= 0 ? string.Concat(FormatF0(live.total_latency_ms), "ms")   : "—";
-            _cachedStatEnc = live.encode_latency_ms  >= 0 ? string.Concat(FormatF0(live.encode_latency_ms), "ms")  : "—";
-            _cachedStatDec = live.decode_latency_ms  >= 0 ? string.Concat(FormatF0(live.decode_latency_ms), "ms")  : "—";
-            _cachedStatFps = live.client_fps         >= 0 ? FormatF0(live.client_fps)                               : "—";
+            FormatMsCached(live.network_latency_ms, ref _lastKeyStatNet, ref _cachedStatNet);
+            FormatMsCached(live.total_latency_ms,   ref _lastKeyStatTot, ref _cachedStatTot);
+            FormatMsCached(live.encode_latency_ms,  ref _lastKeyStatEnc, ref _cachedStatEnc);
+            FormatMsCached(live.decode_latency_ms,  ref _lastKeyStatDec, ref _cachedStatDec);
+            FormatIntCached(live.client_fps,        ref _lastKeyStatFps, ref _cachedStatFps);
 
             _cachedColNet = GetColor((float)live.network_latency_ms);
             _cachedColTot = GetTotalColor((float)live.total_latency_ms, false);
@@ -309,11 +406,16 @@ namespace VaroniaBackOffice
             {
                 CalculerMoyenneRing(_cachedAvg);
 
-                _cachedAvgNet  = _cachedAvg.network_latency_ms >= 0 ? string.Concat(FormatF0(_cachedAvg.network_latency_ms), "ms") : "—";
-                _cachedAvgTot  = _cachedAvg.total_latency_ms   >= 0 ? string.Concat(FormatF0(_cachedAvg.total_latency_ms), "ms")   : "—";
-                _cachedAvgEnc  = _cachedAvg.encode_latency_ms  >= 0 ? string.Concat(FormatF0(_cachedAvg.encode_latency_ms), "ms")  : "—";
-                _cachedAvgDec  = _cachedAvg.decode_latency_ms  >= 0 ? string.Concat(FormatF0(_cachedAvg.decode_latency_ms), "ms")  : "—";
-                _cachedAvgLost = _lostStreamCount.ToString();
+                FormatMsCached(_cachedAvg.network_latency_ms, ref _lastKeyAvgNet, ref _cachedAvgNet);
+                FormatMsCached(_cachedAvg.total_latency_ms,   ref _lastKeyAvgTot, ref _cachedAvgTot);
+                FormatMsCached(_cachedAvg.encode_latency_ms,  ref _lastKeyAvgEnc, ref _cachedAvgEnc);
+                FormatMsCached(_cachedAvg.decode_latency_ms,  ref _lastKeyAvgDec, ref _cachedAvgDec);
+
+                if (_lostStreamCount != _lastKeyAvgLost)
+                {
+                    _lastKeyAvgLost = _lostStreamCount;
+                    _cachedAvgLost = _lostStreamCount.ToString();
+                }
 
                 _cachedAvgColNet = GetColor((float)_cachedAvg.network_latency_ms);
                 _cachedAvgColTot = GetTotalColor((float)_cachedAvg.total_latency_ms, false);
@@ -331,7 +433,19 @@ namespace VaroniaBackOffice
                     if (v != -1) { sumTotal += v; validCount++; }
                 }
                 _cachedAvgTotal5s = validCount > 0 ? sumTotal / validCount : 0;
-                _cachedAvgLineLabel = string.Concat("avg ", FormatF1(_cachedAvgTotal5s));
+
+                // Avg line label "avg X.X" : clé = round(value*10).
+                long avg5sKey = (long)(_cachedAvgTotal5s * 10.0 + 0.5);
+                if (avg5sKey != _lastKeyAvg5s)
+                {
+                    _lastKeyAvg5s = avg5sKey;
+                    _sbFmt.Length = 0;
+                    _sbFmt.Append("avg ");
+                    _sbFmt.Append(avg5sKey / 10);
+                    _sbFmt.Append('.');
+                    _sbFmt.Append(avg5sKey % 10);
+                    _cachedAvgLineLabel = _sbFmt.ToString();
+                }
             }
         }
 
@@ -666,11 +780,18 @@ namespace VaroniaBackOffice
         private void OnEnable()
         {
             BackOfficeVaronia.OnMovieChanged += OnMovieChanged;
+#if VBO_UITOOLKIT_OVERLAYS
+            BuildOverlay_UITK();
+#endif
         }
 
         private void OnDisable()
         {
             BackOfficeVaronia.OnMovieChanged -= OnMovieChanged;
+#if VBO_UITOOLKIT_OVERLAYS
+            if (_panelSettings != null) Destroy(_panelSettings);
+            if (_doc != null && _doc.gameObject != null) Destroy(_doc.gameObject);
+#endif
         }
 
         private void OnMovieChanged()
@@ -679,9 +800,15 @@ namespace VaroniaBackOffice
                 show = BackOfficeVaronia.Instance.config.HideMode == 0;
         }
 
+#if !VBO_UITOOLKIT_OVERLAYS
         private void OnGUI()
         {
             if (!_ready || !show) return;
+
+            // Skip Layout event — IMGUI tourne 2× par frame (Layout + Repaint),
+            // ce widget n'a aucune interaction donc on n'a besoin que du Repaint.
+            // Réduit l'alloc interne GUIStyle.GetMeshInfo / GUIUtility.BeginGUI de moitié.
+            if (Event.current.type != EventType.Repaint) return;
 
             EnsureStyles();
             EnsureRT();
@@ -801,6 +928,9 @@ namespace VaroniaBackOffice
             return new Rect(x, y, w, h);
         }
 
+// ─── Color helpers (partagés IMGUI + UITK — utilisés par RebuildCachedData / RenderToRT)
+#endif // !VBO_UITOOLKIT_OVERLAYS
+
         private Color GetColor(float v)
         {
             if (v < 0f)               return ColMuted;
@@ -834,7 +964,8 @@ namespace VaroniaBackOffice
             return new Color(ColGood.r, ColGood.g, ColGood.b, alpha);
         }
 
-        // ─── Styles ──────────────────────────────────────────────────────────────
+#if !VBO_UITOOLKIT_OVERLAYS
+        // ─── Styles (IMGUI only) ─────────────────────────────────────────────────
 
         private void EnsureStyles()
         {
@@ -888,7 +1019,295 @@ namespace VaroniaBackOffice
             t.hideFlags = HideFlags.HideAndDontSave;
             return t;
         }
+#endif // !VBO_UITOOLKIT_OVERLAYS
 
+#if VBO_UITOOLKIT_OVERLAYS
+        // ════════════════════════════════════════════════════════════════════════
+        //  UI Toolkit version — Image element pour le RT + Labels pour le texte
+        // ════════════════════════════════════════════════════════════════════════
 
+        private UIDocument _doc;
+        private PanelSettings _panelSettings;
+        private VisualElement _rootU, _panelU, _chartImageEl, _pillU;
+        private Label _vsvrLabel, _pillLabel, _avgLineLabel;
+        // Stats labels (current + average rows) : 5 colonnes × 2 (label + value) chacune
+        private Label _statNetLbl, _statTotLbl, _statEncLbl, _statDecLbl, _statFpsLbl;
+        private Label _statNetVal, _statTotVal, _statEncVal, _statDecVal, _statFpsVal;
+        private Label _avgNetLbl, _avgTotLbl, _avgEncLbl, _avgDecLbl, _avgLostLbl;
+        private Label _avgNetVal, _avgTotVal, _avgEncVal, _avgDecVal, _avgLostVal;
+        private Label _waitingLiveLabel, _waitingAvgLabel;
+
+        private void BuildOverlay_UITK()
+        {
+            _panelSettings = ScriptableObject.CreateInstance<PanelSettings>();
+            _panelSettings.scaleMode = PanelScaleMode.ConstantPixelSize;
+            _panelSettings.sortingOrder = 100;
+
+            var uiGo = new GameObject("[VaroniaLatencyChartUI]");
+            uiGo.transform.SetParent(transform, false);
+            _doc = uiGo.AddComponent<UIDocument>();
+            _doc.panelSettings = _panelSettings;
+
+            var font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf")
+                    ?? Resources.GetBuiltinResource<Font>("Arial.ttf");
+
+            _rootU = _doc.rootVisualElement;
+            _rootU.style.flexGrow = 1;
+            _rootU.pickingMode = PickingMode.Ignore;
+            if (font != null) _rootU.style.unityFont = font;
+
+            _panelU = new VisualElement
+            {
+                pickingMode = PickingMode.Ignore,
+                style =
+                {
+                    position = Position.Absolute,
+                    width = size.x,
+                    height = size.y,    // height fixe — équivalent panel rect IMGUI
+                    // Pas de padding : les Labels sont positionnés absolute avec coords
+                    // qui incluent déjà leurs offsets (= identiques aux maths IMGUI).
+                    borderTopLeftRadius = 4, borderTopRightRadius = 4,
+                    borderBottomLeftRadius = 4, borderBottomRightRadius = 4,
+                }
+            };
+            PositionPanelUITK();
+            _rootU.Add(_panelU);
+
+            // Image element fond → affichera le RenderTexture du chart (= rendu GL inchangé).
+            // Posé absolute pour couvrir toute la surface du panel, les labels passent
+            // par-dessus en flex/absolute selon le cas.
+            _chartImageEl = new VisualElement
+            {
+                pickingMode = PickingMode.Ignore,
+                style =
+                {
+                    position = Position.Absolute,
+                    left = 0, top = 0, right = 0, bottom = 0,
+                    borderTopLeftRadius = 4, borderTopRightRadius = 4,
+                    borderBottomLeftRadius = 4, borderBottomRightRadius = 4,
+                }
+            };
+            _panelU.Add(_chartImageEl);
+
+            // === Layout EN POSITION ABSOLUE pour mimer exactement IMGUI ===
+            // IMGUI utilise des Y/X fixes à l'intérieur du panel, on fait pareil ici
+            // → la zone "chart bars" du RT (qui commence après le header + 2 stats rows
+            //   dans le rendu GL) reste libre des labels qui sont au-dessus.
+            //
+            // Constantes IMGUI (cf. RenderToRT) :
+            //   HeaderH = 22  → header occupe [0, 22]
+            //   statsY  = 22+1  = 23
+            //   StatsH  = 22  → stats live [23, 45]
+            //   avgY    = 23+22+1 = 46
+            //   stats avg [46, 68]
+            //   chart bars commencent ~68 (div3Y + PadH)
+            //
+            // On positionne TOUS les Labels en position absolute avec ces coordonnées.
+
+            // Header
+            _vsvrLabel = MakeULabel("VSVR", 9, FontStyle.Bold, ColMutedFg, TextAnchor.MiddleLeft);
+            _vsvrLabel.style.position = Position.Absolute;
+            _vsvrLabel.style.left = 12; _vsvrLabel.style.top = 4;
+            _vsvrLabel.style.width = 150; _vsvrLabel.style.height = 18;
+            _panelU.Add(_vsvrLabel);
+
+            // Pill
+            _pillU = new VisualElement
+            {
+                pickingMode = PickingMode.Ignore,
+                style =
+                {
+                    position = Position.Absolute,
+                    right = 4, top = 5,
+                    width = 106, height = 18,
+                    paddingLeft = 4, paddingRight = 4,
+                    backgroundColor = new Color(ColBad.r, ColBad.g, ColBad.b, 0.15f),
+                    alignItems = Align.Center, justifyContent = Justify.Center,
+                }
+            };
+            _pillLabel = MakeULabel("● OFFLINE", 9, FontStyle.Bold, ColBad, TextAnchor.MiddleCenter);
+            _pillU.Add(_pillLabel);
+            _panelU.Add(_pillU);
+
+            // Stats row LIVE — 5 colonnes absolutely positioned dans [Y=23, H=22]
+            BuildStatsRow_UITK(23,
+                out _statNetLbl, out _statNetVal,
+                out _statTotLbl, out _statTotVal,
+                out _statEncLbl, out _statEncVal,
+                out _statDecLbl, out _statDecVal,
+                out _statFpsLbl, out _statFpsVal,
+                "NET", "TOT", "ENC", "DEC", "FPS");
+
+            _waitingLiveLabel = MakeULabel("En attente de données…", 8, FontStyle.Bold, ColMutedFg, TextAnchor.MiddleLeft);
+            _waitingLiveLabel.style.position = Position.Absolute;
+            _waitingLiveLabel.style.left = 12; _waitingLiveLabel.style.top = 27;
+            _waitingLiveLabel.style.width = size.x - 16; _waitingLiveLabel.style.height = 22;
+            _waitingLiveLabel.style.display = DisplayStyle.None;
+            _panelU.Add(_waitingLiveLabel);
+
+            // Stats row AVG — Y=46, H=22
+            BuildStatsRow_UITK(46,
+                out _avgNetLbl,  out _avgNetVal,
+                out _avgTotLbl,  out _avgTotVal,
+                out _avgEncLbl,  out _avgEncVal,
+                out _avgDecLbl,  out _avgDecVal,
+                out _avgLostLbl, out _avgLostVal,
+                "Avg.NET", "Avg.TOT", "AVG.ENC", "AVG.DEC", "LOST");
+
+            _waitingAvgLabel = MakeULabel("Calcul des moyennes…", 8, FontStyle.Bold, ColMutedFg, TextAnchor.MiddleLeft);
+            _waitingAvgLabel.style.position = Position.Absolute;
+            _waitingAvgLabel.style.left = 12; _waitingAvgLabel.style.top = 50;
+            _waitingAvgLabel.style.width = size.x - 16; _waitingAvgLabel.style.height = 22;
+            _waitingAvgLabel.style.display = DisplayStyle.None;
+            _panelU.Add(_waitingAvgLabel);
+
+            // Avg line label (positioned dynamically over chart in UpdateLabels_UITK)
+            _avgLineLabel = MakeULabel("", 9, FontStyle.Bold, ColMutedFg, TextAnchor.MiddleLeft);
+            _avgLineLabel.style.position = Position.Absolute;
+            _avgLineLabel.style.width = 50; _avgLineLabel.style.height = 12;
+            _avgLineLabel.style.display = DisplayStyle.None;
+            _panelU.Add(_avgLineLabel);
+        }
+
+        /// <summary>
+        /// Construit 5 colonnes (label + value chacune) positionnées absolument à
+        /// rowY dans le panel, sur une hauteur de 22px (= StatsH dans IMGUI).
+        /// Mimic exact de DrawStatColCached IMGUI : halfH = 22 * 0.44 = 9.68.
+        /// </summary>
+        private void BuildStatsRow_UITK(float rowY,
+            out Label l1, out Label v1, out Label l2, out Label v2,
+            out Label l3, out Label v3, out Label l4, out Label v4,
+            out Label l5, out Label v5,
+            string ll1, string ll2, string ll3, string ll4, string ll5)
+        {
+            const float StatsH = 22f;
+            const float halfH = StatsH * 0.44f; // ~9.68
+            float colW = (size.x - 16f) / 5f;
+
+            BuildStatCol_UITK(8 + colW * 0, rowY, colW, halfH, ll1, out l1, out v1);
+            BuildStatCol_UITK(8 + colW * 1, rowY, colW, halfH, ll2, out l2, out v2);
+            BuildStatCol_UITK(8 + colW * 2, rowY, colW, halfH, ll3, out l3, out v3);
+            BuildStatCol_UITK(8 + colW * 3, rowY, colW, halfH, ll4, out l4, out v4);
+            BuildStatCol_UITK(8 + colW * 4, rowY, colW, halfH, ll5, out l5, out v5);
+        }
+
+        private void BuildStatCol_UITK(float x, float y, float w, float halfH,
+            string labelText, out Label labelOut, out Label valueOut)
+        {
+            labelOut = MakeULabel(labelText, 8, FontStyle.Bold, ColMutedFg, TextAnchor.MiddleLeft);
+            labelOut.style.position = Position.Absolute;
+            labelOut.style.left = x; labelOut.style.top = y + 1;
+            labelOut.style.width = w; labelOut.style.height = halfH;
+            _panelU.Add(labelOut);
+
+            valueOut = MakeULabel("—", 10, FontStyle.Bold, ColValue, TextAnchor.MiddleLeft);
+            valueOut.style.position = Position.Absolute;
+            valueOut.style.left = x; valueOut.style.top = y + halfH;
+            valueOut.style.width = w; valueOut.style.height = halfH + 2;
+            _panelU.Add(valueOut);
+        }
+
+        // (Anciennes méthodes MakeStatsRowUITK / MakeStatCol retirées — remplacées par
+        //  BuildStatsRow_UITK / BuildStatCol_UITK qui utilisent position absolute.)
+
+        private static Label MakeULabel(string text, int fontSize, FontStyle fStyle, Color color, TextAnchor anchor)
+        {
+            return new Label(text)
+            {
+                pickingMode = PickingMode.Ignore,
+                style = { fontSize = fontSize, color = color, unityFontStyleAndWeight = fStyle, unityTextAlign = anchor }
+            };
+        }
+
+        private void PositionPanelUITK()
+        {
+            if (_panelU == null) return;
+            float m = margin;
+            _panelU.style.width = size.x * scaleFactor;
+            switch (corner)
+            {
+                case DisplayCorner.TopLeft:
+                    _panelU.style.left = m; _panelU.style.top = m;
+                    _panelU.style.right = StyleKeyword.Auto; _panelU.style.bottom = StyleKeyword.Auto;
+                    break;
+                case DisplayCorner.TopRight:
+                    _panelU.style.right = m; _panelU.style.top = m;
+                    _panelU.style.left = StyleKeyword.Auto; _panelU.style.bottom = StyleKeyword.Auto;
+                    break;
+                case DisplayCorner.BottomLeft:
+                    _panelU.style.left = m; _panelU.style.bottom = m;
+                    _panelU.style.right = StyleKeyword.Auto; _panelU.style.top = StyleKeyword.Auto;
+                    break;
+                default:
+                    _panelU.style.right = m; _panelU.style.bottom = m;
+                    _panelU.style.left = StyleKeyword.Auto; _panelU.style.top = StyleKeyword.Auto;
+                    break;
+            }
+        }
+
+        /// <summary>
+        /// Refresh des labels et de l'image RT depuis les caches (called from Update
+        /// quand _rtDirty est set). Pas de string.Concat dans cette méthode — on
+        /// réutilise les cachedXXX strings construits dans RebuildCachedData.
+        /// </summary>
+        private void UpdateLabels_UITK()
+        {
+            if (_panelU == null) return;
+            _panelU.style.display = show ? DisplayStyle.Flex : DisplayStyle.None;
+            if (!show) return;
+
+            // Chart image : RT mis à jour par RenderToRT → bind sur le VisualElement
+            if (_chartImageEl != null && _chartRT != null)
+                _chartImageEl.style.backgroundImage = Background.FromRenderTexture(_chartRT);
+
+            _vsvrLabel.text = _cachedVsvrLabel;
+
+            bool connected = _wsConnected;
+            _pillLabel.text = connected ? "● CONNECTED" : "● OFFLINE";
+            _pillLabel.style.color = connected ? ColGood : ColBad;
+            _pillU.style.backgroundColor = new Color(
+                connected ? ColGood.r : ColBad.r,
+                connected ? ColGood.g : ColBad.g,
+                connected ? ColGood.b : ColBad.b, 0.15f);
+
+            // Live row
+            _waitingLiveLabel.style.display = _cachedHasLive ? DisplayStyle.None : DisplayStyle.Flex;
+            if (_cachedHasLive)
+            {
+                _statNetVal.text = _cachedStatNet; _statNetVal.style.color = _cachedColNet;
+                _statTotVal.text = _cachedStatTot; _statTotVal.style.color = _cachedColTot;
+                _statEncVal.text = _cachedStatEnc; _statEncVal.style.color = _cachedColEnc;
+                _statDecVal.text = _cachedStatDec; _statDecVal.style.color = _cachedColDec;
+                _statFpsVal.text = _cachedStatFps; _statFpsVal.style.color = ColValue;
+            }
+
+            // Avg row
+            _waitingAvgLabel.style.display = _hasAvgData ? DisplayStyle.None : DisplayStyle.Flex;
+            if (_hasAvgData)
+            {
+                _avgNetVal.text = _cachedAvgNet;  _avgNetVal.style.color  = _cachedAvgColNet;
+                _avgTotVal.text = _cachedAvgTot;  _avgTotVal.style.color  = _cachedAvgColTot;
+                _avgEncVal.text = _cachedAvgEnc;  _avgEncVal.style.color  = _cachedAvgColEnc;
+                _avgDecVal.text = _cachedAvgDec;  _avgDecVal.style.color  = _cachedAvgColDec;
+                _avgLostVal.text = _cachedAvgLost; _avgLostVal.style.color = ColValue;
+
+                // Avg line label (overlay)
+                _avgLineLabel.style.display = DisplayStyle.Flex;
+                _avgLineLabel.text = _cachedAvgLineLabel;
+                // Position approximative — based on chart Y proportion
+                if (_chartH > 0)
+                {
+                    float ratio = Mathf.Clamp01((float)_cachedAvgTotal5s / maxTotalLatency);
+                    float lineY = _chartOfsY + _chartH - (ratio * _chartH);
+                    _avgLineLabel.style.left = _chartOfsX + 2;
+                    _avgLineLabel.style.top = lineY - 12;
+                }
+            }
+            else
+            {
+                _avgLineLabel.style.display = DisplayStyle.None;
+            }
+        }
+#endif // VBO_UITOOLKIT_OVERLAYS
     }
 }

@@ -99,6 +99,20 @@ namespace VaroniaBackOffice
             _lastUpdateTime = Time.realtimeSinceStartup;
         }
 
+        private void OnApplicationFocus(bool hasFocus)
+        {
+#if UNITY_ANDROID && !UNITY_EDITOR
+            // L'utilisateur revient des Settings Android. Si la permission est maintenant grantee,
+            // on relance l'app pour que tout le pipeline (LoadConfig, etc.) repasse proprement.
+            if (hasFocus && _waitingForAndroidPermission && VaroniaAndroidPermissions.HasAllFilesAccess())
+            {
+                _waitingForAndroidPermission = false;
+                Debug.Log("[BackOfficeVaronia] Permission MANAGE_EXTERNAL_STORAGE accordee. Restart de l'app.");
+                VaroniaAndroidPermissions.RestartApp();
+            }
+#endif
+        }
+
         private void OnDisable()
         {
             SceneManager.activeSceneChanged -= OnActiveSceneChanged;
@@ -287,10 +301,25 @@ namespace VaroniaBackOffice
         /// <summary>
         /// Loads the config from JSON. If the file doesn't exist, it creates a new one with default values.
         /// </summary>
+        // Flag pour eviter de demander la permission en boucle si l'utilisateur revient sans avoir grante
+        private static bool _waitingForAndroidPermission = false;
+
         public void LoadConfig()
         {
+#if UNITY_ANDROID && !UNITY_EDITOR
+            // Verifier la permission MANAGE_EXTERNAL_STORAGE avant toute ecriture sous /storage/emulated/0/Varonia/
+            if (!VaroniaAndroidPermissions.HasAllFilesAccess())
+            {
+                Debug.LogWarning("[BackOfficeVaronia] Permission MANAGE_EXTERNAL_STORAGE absente. Ouverture des Settings Android pour grant.");
+                _waitingForAndroidPermission = true;
+                VaroniaAndroidPermissions.RequestAllFilesAccess();
+                return; // pas la peine de tenter d'ecrire, ca jettera UnauthorizedAccessException
+            }
+            string rootPath = "/storage/emulated/0/Varonia";
+#else
             string rootPath = Application.persistentDataPath.Replace(
                 Application.companyName + "/" + Application.productName, "Varonia");
+#endif
             string configPath = Path.Combine(rootPath, "GlobalConfig.json");
             string fdpPath = Path.Combine(rootPath, "GlobalConfig.fdp");
 
@@ -439,9 +468,14 @@ namespace VaroniaBackOffice
         {
             try
             {
+#if UNITY_ANDROID && !UNITY_EDITOR
+                string rootPath = "/storage/emulated/0/Varonia";
+                if (!Directory.Exists(rootPath)) Directory.CreateDirectory(rootPath);
+#else
                 string rootPath = Application.persistentDataPath.Replace(Application.companyName + "/" + Application.productName, "Varonia");
+#endif
                 string filePath = Path.Combine(rootPath, "GlobalConfig.json");
-                
+
                 string json = config.ToJson(); // Using the Newtonsoft method we discussed
                 File.WriteAllText(filePath, json);
                 

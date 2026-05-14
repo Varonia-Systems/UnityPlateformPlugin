@@ -17,6 +17,7 @@ namespace VaroniaBackOffice
         private const string StrikerSymbol   = "STRIKER_LINK";
         private const string GameConfigSymbol= "GAME_CONFIG";
         private const string GameScoreSymbol = "GAME_SCORE";
+        private const string UIToolkitOverlaysSymbol = "VBO_UITOOLKIT_OVERLAYS";
 
         static VaroniaProjectSettings()
         {
@@ -557,6 +558,46 @@ namespace VaroniaBackOffice
                     {
                         DrawStatusRow("GAME_SCORE", false,
                             "Game Score inactive — GameScore features are disabled.");
+                    }
+                }
+            );
+
+            // ── Section : UI Toolkit Overlays ────────────────────────────────────
+            DrawSectionCard(
+                "🎨  Debug Overlays Rendering",
+                "Switches the debug overlays (FPS, Latency, Info, Input, AdvBoundary) between " +
+                "two implementations :\n" +
+                "  • OFF (default) → IMGUI — works on all Unity versions, but allocates GC " +
+                "every frame (~600 KB/s in typical scenes).\n" +
+                "  • ON → UI Toolkit — retained mode, zero per-frame alloc, requires runtime " +
+                "UI Toolkit (Unity 2021.2+).",
+                ColorAccentGreen,
+                () =>
+                {
+                    bool current = HasDefine(defines, UIToolkitOverlaysSymbol);
+                    bool next    = DrawToggleRow("Use UI Toolkit for debug overlays",
+                        "Active la version UI Toolkit (zero-alloc) des overlays debug. " +
+                        "Désactive pour repartir sur la version IMGUI classique compatible " +
+                        "avec les anciennes versions de Unity.",
+                        current);
+
+                    if (next != current)
+                    {
+                        SetDefines(next
+                            ? AddDefine(defines, UIToolkitOverlaysSymbol)
+                            : RemoveDefine(defines, UIToolkitOverlaysSymbol));
+                        defines = GetDefines();
+                    }
+
+                    if (current)
+                    {
+                        DrawStatusRow("VBO_UITOOLKIT_OVERLAYS", true,
+                            "UI Toolkit actif — overlays retained-mode, zero alloc / frame.");
+                    }
+                    else
+                    {
+                        DrawStatusRow("VBO_UITOOLKIT_OVERLAYS", false,
+                            "IMGUI actif — compatible toutes versions Unity, mais alloue chaque frame.");
                     }
                 }
             );

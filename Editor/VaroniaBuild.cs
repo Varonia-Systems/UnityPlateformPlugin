@@ -240,6 +240,7 @@ namespace VaroniaBackOffice
         [SerializeField] public bool   CopyToServer  = true;
         [SerializeField] public bool   SkipBuild     = false;
         [SerializeField] public bool   ZipBuild      = true;
+        [SerializeField] public bool   DontOverwriteSameDay = false;
 
         // ── Changelog par catégories ──
         [SerializeField] public string ChangelogAdded   = "";
@@ -481,6 +482,41 @@ namespace VaroniaBackOffice
             GUILayout.Label("VARONIA BUILD", headerStyle);
             GUILayout.FlexibleSpace();
 
+            // Icone + nom de la plateforme cible active (Build Settings d'Unity)
+            var activeTarget = EditorUserBuildSettings.activeBuildTarget;
+            string targetLabel;
+            string iconName;
+            switch (activeTarget)
+            {
+                case BuildTarget.Android:
+                    targetLabel = "ANDROID";
+                    iconName    = "BuildSettings.Android";
+                    break;
+                case BuildTarget.StandaloneWindows:
+                case BuildTarget.StandaloneWindows64:
+                    targetLabel = "WINDOWS";
+                    iconName    = "BuildSettings.Standalone";
+                    break;
+                case BuildTarget.iOS:
+                    targetLabel = "iOS";
+                    iconName    = "BuildSettings.iPhone";
+                    break;
+                case BuildTarget.WebGL:
+                    targetLabel = "WEBGL";
+                    iconName    = "BuildSettings.WebGL";
+                    break;
+                default:
+                    targetLabel = activeTarget.ToString().ToUpper();
+                    iconName    = "BuildSettings.SelectedIcon";
+                    break;
+            }
+            var targetIcon = EditorGUIUtility.IconContent(iconName);
+            targetIcon.tooltip = "Active build target (Unity Build Settings): " + activeTarget;
+            GUILayout.Label(targetIcon, GUIStyle.none, GUILayout.Width(20), GUILayout.Height(20));
+            GUILayout.Space(4);
+            GUILayout.Label(targetLabel, tagStyle);
+            GUILayout.Space(12);
+
             Color  pillCol  = canBuild ? colAccent : colError;
             string pillText = canBuild ? "  READY  " : "  ERROR  ";
             var    pill     = new GUIStyle(tagStyle);
@@ -676,6 +712,8 @@ namespace VaroniaBackOffice
                 DrawToggleRow(ref ZipBuild,     "Zip Build",        "Compresser le build en archive ZIP");
                 EditorGUILayout.Space(2);
                 DrawToggleRow(ref CopyToServer, "Copy to Server",   "Copier les archives sur le serveur de build");
+                EditorGUILayout.Space(2);
+                DrawToggleRow(ref DontOverwriteSameDay, "Don't Overwrite Same Day", "Si un dossier de build du jour existe deja sur le serveur, ajouter un suffixe .1, .2, .3 ... au lieu d'ecraser");
             }, colTextMuted);
 
             EditorGUILayout.Space(12);
@@ -911,7 +949,7 @@ namespace VaroniaBackOffice
             }
         }
 
-        public static void EndBuild(bool success)
+        public static async void EndBuild(bool success)
         {
             if (_endBuildCalled) return;
             _endBuildCalled = true;
@@ -932,14 +970,27 @@ namespace VaroniaBackOffice
                 return;
             }
 
+            // Si l'utilisateur a build via le menu Unity standard (et pas Varonia/Build Menu),
+            // VaroniaBuild_ n'est pas instancie -> on skip tout le pipeline post-build Varonia.
+            if (VaroniaBuild_ == null)
+            {
+                UnityEngine.Debug.Log("[VaroniaBuild] Build via menu Unity standard (pas Varonia/Build Menu). Pipeline post-build Varonia (version.json / zip / copy server) skippe.");
+                return;
+            }
+
+            // IMPORTANT: on attend Version() (delete des folders Backup/Burst + ecriture version.json)
+            // AVANT de lancer le Zip, sinon race condition -> zip contient les folders et pas le version.json.
             try
             {
                 string gid;
                 using (var sr = new StreamReader(Application.streamingAssetsPath + "/GameID.txt"))
                     gid = sr.ReadToEnd();
-                VaroniaBuild_.Version(gid);
+                await VaroniaBuild_.Version(gid);
             }
-            catch { }
+            catch (Exception e)
+            {
+                UnityEngine.Debug.LogError($"[VaroniaBuild] Erreur Version() : {e.Message}");
+            }
 
             Buildwindows.CloseWindow();
 
@@ -966,7 +1017,7 @@ namespace VaroniaBackOffice
         static void PlayFailure() => VaroniaBuildSounds.Play(success: false);
         static void PlayStep()    => VaroniaBuildSounds.PlayStep();
 
-        async void Version(string GameId)
+        async Task Version(string GameId)
         {
             await Task.Delay(1500);
 
@@ -1118,9 +1169,27 @@ namespace VaroniaBackOffice
                 return;
             }
 
-            string dest = serverPath + "/" + GameId + "/" + DateTime.Now.ToString("yyyy.M.d");
-            if (BetaVersion) dest += "_BETA";
-            if (LTS)         dest += "_LTS";
+            // Construction du nom de dossier destination
+            string baseName = DateTime.Now.ToString("yyyy.M.d");
+            string suffix   = "";
+            if (BetaVersion) suffix = "_BETA";
+            else if (LTS)    suffix = "_LTS";
+
+            string folderName = baseName + suffix;
+
+            // Option : si activee, ne pas ecraser un dossier de meme jour, incrementer .1, .2, .3...
+            if (DontOverwriteSameDay)
+            {
+                string parentDir = serverPath + "/" + GameId;
+                int n = 1;
+                while (Directory.Exists(parentDir + "/" + folderName))
+                {
+                    folderName = baseName + "." + n + suffix;
+                    n++;
+                }
+            }
+
+            string dest = serverPath + "/" + GameId + "/" + folderName;
 
             Buildwindows.SetState("COPIE SERVEUR", "Création du dossier de destination...", 0f);
             Buildwindows.ShowWindow();
@@ -1274,10 +1343,16 @@ namespace VaroniaBackOffice
                     if (EditorBuildSettings.scenes[i].enabled)
                         levels.Add(SceneUtility.GetScenePathByBuildIndex(i));
 
+                // Detection auto de la plateforme cible : Android -> .apk, sinon -> .exe Windows
+                var activeTarget = EditorUserBuildSettings.activeBuildTarget;
+                bool isAndroid = activeTarget == BuildTarget.Android;
+                string outputExt = isAndroid ? ".apk" : ".exe";
+                BuildTarget targetForBuild = isAndroid ? BuildTarget.Android : BuildTarget.StandaloneWindows64;
+
                 var report = BuildPipeline.BuildPlayer(
                     levels.ToArray(),
-                    EditorPrefs.GetString("VBO_BuildPath") + "/" + Application.productName + "/" + Application.productName + ".exe",
-                    BuildTarget.StandaloneWindows64,
+                    EditorPrefs.GetString("VBO_BuildPath") + "/" + Application.productName + "/" + Application.productName + outputExt,
+                    targetForBuild,
                     BuildOptions.None
                 );
 

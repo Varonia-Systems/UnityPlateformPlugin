@@ -33,9 +33,20 @@ namespace VBO_Ultimate.Runtime.Scripts.Input
             yield return new WaitUntil(() => BackOfficeVaronia.Instance.mqttClient != null);
             yield return new WaitUntil(() => BackOfficeVaronia.Instance.mqttClient.client != null);
 
-            MacAdress = BackOfficeVaronia.Instance.GetConfigField<string>("WeaponMAC");
+            // Nouveau système multi-armes : on prend le SerialNumber du binding à cet index.
+            // Si la liste GlobalConfig.Devices est vide, GetWeaponBinding retombe sur la clé JSON "WeaponMAC" (arme 0).
+            var binding = BackOfficeVaronia.Instance.config.GetWeaponBinding(_weaponIndex);
+            if (binding != null && !string.IsNullOrEmpty(binding.SerialNumber))
+            {
+                MacAdress = binding.SerialNumber;
+            }
+            else
+            {
+                Debug.LogWarning($"[MQTT_Weapon] Aucun SerialNumber pour weaponIndex={_weaponIndex} — fallback sur la clé JSON 'WeaponMAC'.");
+                MacAdress = BackOfficeVaronia.Instance.GetConfigField<string>("WeaponMAC");
+            }
 
-            Debug.Log("Subscribe to: " + MacAdress);
+            Debug.Log($"[MQTT_Weapon] Subscribe to: {MacAdress} (weaponIndex={_weaponIndex})");
 
             BackOfficeVaronia.Instance.mqttClient.client.Subscribe(
                 new string[] { "DeviceToUnity/" + MacAdress + "/#" },
@@ -57,10 +68,23 @@ namespace VBO_Ultimate.Runtime.Scripts.Input
         {
             string stringvalue = System.Text.Encoding.UTF8.GetString(value);
 
-            if (title.StartsWith("DeviceToUnity"))
-                title = title.Split('/').LastOrDefault();
-            else
+            // Topic attendu : "DeviceToUnity/{MAC}/{key}"
+            if (!title.StartsWith("DeviceToUnity"))
                 return;
+
+            var parts = title.Split('/');
+            if (parts.Length < 3)
+                return;
+
+            string topicMac = parts[1];
+
+            // ── Filtre multi-armes : ReceiveMsg est un event MQTT global, tous les MQTT_Weapon
+            // de la scène y sont abonnés. Sans ce filtre, un message destiné à l'arme A
+            // déclencherait aussi le handler de l'arme B → tir fantôme.
+            if (!string.IsNullOrEmpty(MacAdress) && topicMac != MacAdress)
+                return;
+
+            title = parts[parts.Length - 1]; // dernier segment = clé (1, 2, BAT, RSSI, BOOT_TIME)
 
             _mainThreadQueue.Enqueue(() =>
             {

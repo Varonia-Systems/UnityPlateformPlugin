@@ -109,6 +109,10 @@ public class ItemTrackingEditor : Editor
         EditorGUILayout.Space(8);
 
         // --- STATUS CARD ---
+        // Force-lost externe = override via TrackingSuppressionZone (holster, caisse, etc.)
+        // Lu hors lambda pour être accessible aussi côté couleur de bordure (argument 2 de DrawCard).
+        bool externalForceLost = ((ItemTracking)target).externalForceLost;
+
         DrawCard(() => {
             if (isFound) {
                 bigStatusStyle.normal.textColor = accentColor;
@@ -139,7 +143,31 @@ public class ItemTrackingEditor : Editor
             GUILayout.Label(isTrackingVal ? "TRACKING ACTIF" : "TRACKING PERDU", trackStyle);
             GUILayout.FlexibleSpace();
             GUILayout.EndHorizontal();
-        }, isFound ? accentColor : colTextSecond);
+
+            // Ligne secondaire : indicateur "FORCE TRACKING PERDU" si override actif.
+            // Couleur warn (orange) pour distinguer d'une perte hardware (rouge).
+            // Variantes : "(zone)" si hardware OK / "(zone + hardware)" si les 2 cumulés.
+            if (externalForceLost)
+            {
+                GUILayout.Space(2);
+                GUILayout.BeginHorizontal();
+                GUILayout.FlexibleSpace();
+                Rect forceDot = GUILayoutUtility.GetRect(8, 8, GUILayout.Width(8), GUILayout.Height(8));
+                EditorGUI.DrawRect(new Rect(forceDot.x, forceDot.y + 3, 8, 8), colWarn);
+                GUILayout.Space(6);
+                GUIStyle forceStyle = new GUIStyle(EditorStyles.boldLabel)
+                {
+                    fontSize = 9,
+                    normal   = { textColor = colWarn }
+                };
+                string forceSub = isTrackingVal
+                    ? "↳ FORCE TRACKING PERDU (zone)"
+                    : "↳ FORCE TRACKING PERDU (zone + hardware)";
+                GUILayout.Label(forceSub, forceStyle);
+                GUILayout.FlexibleSpace();
+                GUILayout.EndHorizontal();
+            }
+        }, externalForceLost ? colWarn : (isFound ? accentColor : colTextSecond));
 
         EditorGUILayout.Space(8);
 

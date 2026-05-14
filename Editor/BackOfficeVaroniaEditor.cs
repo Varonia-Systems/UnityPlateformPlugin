@@ -361,6 +361,56 @@ namespace VaroniaBackOffice
 
                 }, colWarn);
 
+                GUILayout.Space(8);
+
+                // ── VR Shutdown (test crash prevention) ──
+                // Bouton pour fermer manuellement le plugin OpenVR/SteamVR (openvr_api.dll)
+                // AVANT de Stop le play mode. Test : si ça empêche le crash vrclient_x64
+                // qu'on a au teardown OpenXR, ça confirme que la cohabitation des 2 paths
+                // (OpenXR runtime SteamVR + openvr_api en BG) est bien la cause root.
+                DrawCard(() =>
+                {
+                    DrawSectionLabel("VR SHUTDOWN (TEST)");
+                    DrawDivider();
+                    GUILayout.Space(6);
+
+                    GUILayout.Label("Ferme proprement openvr_api.dll (background SteamVR) " +
+                                    "AVANT d'arrêter le Play Mode. Sert à tester si ce close " +
+                                    "manuel empêche le crash vrclient_x64 au teardown OpenXR.",
+                                    readOnlyStyle);
+                    GUILayout.Space(8);
+
+                    var errBtn = new GUIStyle(buttonStyle);
+                    errBtn.normal.background = MakeRoundedTex(32, 32, colErrorDim, 5);
+                    errBtn.normal.textColor  = colError;
+                    errBtn.hover.textColor   = Color.white;
+                    errBtn.active.background = MakeRoundedTex(32, 32, colError, 5);
+
+#if STEAMVR_ENABLED
+                    bool initialized = SteamVRBridge.InitializedByUs;
+                    string label = initialized
+                        ? "▼ SHUTDOWN OPENVR (was init by us)"
+                        : "OPENVR NOT INITIALIZED BY US";
+                    using (new EditorGUI.DisabledScope(!initialized))
+                    {
+                        if (GUILayout.Button(label, errBtn, GUILayout.Height(32)))
+                        {
+                            SteamVRBridge.SafeShutdown();
+                            Debug.Log("[BackOfficeVaronia Editor] Manual SteamVRBridge.SafeShutdown() triggered.");
+                        }
+                    }
+#else
+                    using (new EditorGUI.DisabledScope(true))
+                    {
+                        GUILayout.Button("STEAMVR_ENABLED define not active", errBtn, GUILayout.Height(32));
+                    }
+                    GUILayout.Space(4);
+                    GUILayout.Label("Add STEAMVR_ENABLED to Scripting Define Symbols to enable this button.",
+                                    readOnlyStyle);
+#endif
+                    GUILayout.Space(4);
+                }, colError);
+
                 Repaint();
             }
             else

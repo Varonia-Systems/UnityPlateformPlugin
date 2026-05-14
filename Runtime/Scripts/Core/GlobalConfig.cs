@@ -14,18 +14,40 @@ namespace VaroniaBackOffice
     public enum Controller
     {
         Unknown = -1,
-        PICO_VSVR_CTRL = 6, 
-        FOCUS3_VBS_VaroniaGun = 3, 
+        PICO_VSVR_CTRL = 6,
+        FOCUS3_VBS_VaroniaGun = 3,
         FOCUS3_VBS_Striker = 50,
         FOCUS3_VBS_HK416 = 101,
         PICO_VSVR_VaroniaGun = 70,
         PICO_VSVR_Striker = 80,
         PICO_VSVR_HK416 = 416,
+        PICO_VSVR_Glock = 417,
         VORTEX_WEAPON_FOCUS = 501,
     }
-    
-    
-    
+
+
+    /// <summary>
+    /// Décrit une arme typée (nouveau système multi-armes).
+    /// L'index de cet item dans <see cref="GlobalConfig.Devices"/> correspond au
+    /// weaponIndex utilisé par VaroniaInput / VaroniaWeaponTracking.
+    /// </summary>
+    [System.Serializable]
+    public class WeaponBinding
+    {
+        /// <summary> Identifiant du contrôleur / modèle d'arme. </summary>
+        public Controller Controller = Controller.Unknown;
+
+        /// <summary> Numéro de série (adresse MAC ou autre identifiant unique). </summary>
+        public string SerialNumber = "";
+
+        /// <summary> Identifiant de tracking (ex. serial du tracker SteamVR, ID OpenXR, etc.). </summary>
+        public string TrackingId = "";
+
+        /// <summary> Force un Steam device index spécifique (-1 = pas de forçage / auto). </summary>
+        public int ForceSteamId = -1;
+    }
+
+
     /// <summary>
     /// Represents the global configuration for the Varonia application.
     /// Maps directly to the GlobalConfig.json file.
@@ -66,8 +88,58 @@ namespace VaroniaBackOffice
         
         
         
-        [Header("Controller")]
+        [Header("Controller (legacy mono-arme)")]
+        /// <summary>
+        /// Ancien système : type de contrôleur unique de l'arme 0.
+        /// Conservé pour rétrocompat — préférer <see cref="Devices"/> pour les nouveaux projets.
+        /// </summary>
         public Controller Controller = 0;
+
+        /// <summary>
+        /// Ancien système : adresse MAC / numéro de série unique de l'arme 0.
+        /// Conservé pour rétrocompat — préférer <see cref="Devices"/> pour les nouveaux projets.
+        /// </summary>
+        public string WeaponMAC = "";
+
+        /// <summary>
+        /// Nouveau système multi-armes : liste typée d'armes, chacune avec son Controller et son SerialNumber.
+        /// L'index dans la liste correspond au weaponIndex (VaroniaInput / VaroniaWeaponTracking).
+        ///
+        /// Rétrocompat : si la liste est vide, on retombe sur l'ancien système
+        /// (<see cref="Controller"/> + clé JSON "WeaponMAC") via <see cref="GetWeaponBinding"/>.
+        /// </summary>
+        [Header("Devices (multi-arme)")]
+        public List<WeaponBinding> Devices = new List<WeaponBinding>();
+
+        /// <summary>
+        /// Résout l'arme à l'index donné.
+        /// - Si <see cref="Devices"/> contient une entrée à cet index → la renvoie.
+        /// - Sinon, pour weaponIndex == 0, retombe sur l'ancien système (Controller + WeaponMAC).
+        /// - Sinon, renvoie null.
+        /// </summary>
+        public WeaponBinding GetWeaponBinding(int weaponIndex)
+        {
+            if (Devices != null && weaponIndex >= 0 && weaponIndex < Devices.Count)
+                return Devices[weaponIndex];
+
+            if (weaponIndex == 0)
+            {
+                // Fallback ancien système : on lit les champs typés Controller + WeaponMAC.
+                // Si WeaponMAC est vide en typé, on tente quand même la lecture via réflexion
+                // (utile pour les vieux JSON où la clé existe mais comme "extra field").
+                string mac = this.WeaponMAC ?? "";
+                if (string.IsNullOrEmpty(mac) && BackOfficeVaronia.Instance != null)
+                    mac = BackOfficeVaronia.Instance.GetConfigField<string>("WeaponMAC") ?? "";
+
+                return new WeaponBinding
+                {
+                    Controller = this.Controller,
+                    SerialNumber = mac
+                };
+            }
+
+            return null;
+        }
 
         [Header("VR")]
         /// <summary>
@@ -98,6 +170,15 @@ namespace VaroniaBackOffice
 #if STEAMVR_ENABLED
             try
             {
+                // Garde-fou anti-crash : OpenVR.Init peut retourner un système "valide"
+                // alors qu'aucun HMD n'est connecté (runtime SteamVR installé mais
+                // casque débranché ou SteamVR pas lancé). Dans ce cas
+                // GetStringTrackedDeviceProperty(0, ...) crash dans vrclient_x64.dll
+                // (segfault natif, le try/catch C# ne peut pas l'attraper).
+                // IsHmdPresent interroge juste le registry runtime — safe à appeler
+                // sans HMD branché, retourne false si pas de casque.
+                if (!OpenVR.IsHmdPresent()) return "";
+
                 var vr = SteamVRBridge.GetSystem();
                 if (vr != null)
                 {

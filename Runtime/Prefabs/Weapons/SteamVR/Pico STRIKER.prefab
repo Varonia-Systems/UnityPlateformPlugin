@@ -287,8 +287,6 @@ GameObject:
   - component: {fileID: 4969284826944685505}
   - component: {fileID: 4678300528435995531}
   - component: {fileID: 1515141387631755482}
-  - component: {fileID: 1665234254476443317}
-  - component: {fileID: 1252191332597432890}
   - component: {fileID: -6458842020520027819}
   - component: {fileID: 57677008285412191}
   m_Layer: 0
@@ -330,7 +328,6 @@ MonoBehaviour:
   mode: 0
   autoFind: 1
   applyToParent: 1
-  targetClass: 3
   trackerIndex: 3
   useSerialFilter: 0
   targetSerial: LHR-XXXXXXXX
@@ -343,6 +340,12 @@ MonoBehaviour:
   foundIndex: -1
   foundModel: 
   foundSerial: 
+  OnTrackingLost:
+    m_PersistentCalls:
+      m_Calls: []
+  OnTrackingRestored:
+    m_PersistentCalls:
+      m_Calls: []
 --- !u!114 &1515141387631755482
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -363,183 +366,6 @@ MonoBehaviour:
   debugRender: {fileID: 2226083048971231324}
   beginRaycast: {fileID: 4050595193025538585}
   trackingOpenVR: {fileID: 0}
---- !u!114 &1665234254476443317
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 7472680712364335062}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: c6353a9704e72734d84a8d1927043467, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: StrikerLink.Unity.Runtime::StrikerLink.Unity.Runtime.Core.StrikerDevice
-  deviceIndex: 0
-  deviceOffsetRoot: {fileID: 4969284826944685505}
-  debugInputsInEditor: 0
-  GUID: 
-  type: 0
-  isConnected: 0
-  isReady: 0
-  batteryLevel: 0
-  chargeStatus: 0
-  triggerPullThreshold: 0.8
-  applyLedsOnConnect: 0
-  connectedLedColor: {r: 0, g: 1, b: 1, a: 1}
-  DeviceEvents:
-    OnDeviceConnected:
-      m_PersistentCalls:
-        m_Calls: []
-    OnDeviceDisconnected:
-      m_PersistentCalls:
-        m_Calls: []
-  TriggerEvents:
-    OnTriggerUp:
-      m_PersistentCalls:
-        m_Calls: []
-    OnTriggerDown:
-      m_PersistentCalls:
-        m_Calls: []
-  ButtonEvents:
-    OnSideLeftUp:
-      m_PersistentCalls:
-        m_Calls: []
-    OnSideLeftDown:
-      m_PersistentCalls:
-        m_Calls: []
-    OnSideRightUp:
-      m_PersistentCalls:
-        m_Calls: []
-    OnSideRightDown:
-      m_PersistentCalls:
-        m_Calls: []
-    OnTouchpadLeftUp:
-      m_PersistentCalls:
-        m_Calls: []
-    OnTouchpadLeftDown:
-      m_PersistentCalls:
-        m_Calls: []
-    OnTouchpadRightUp:
-      m_PersistentCalls:
-        m_Calls: []
-    OnTouchpadRightDown:
-      m_PersistentCalls:
-        m_Calls: []
-    OnFrontTopUp:
-      m_PersistentCalls:
-        m_Calls: []
-    OnFrontTopDown:
-      m_PersistentCalls:
-        m_Calls: []
-    OnFrontBottomUp:
-      m_PersistentCalls:
-        m_Calls: []
-    OnFrontBottomDown:
-      m_PersistentCalls:
-        m_Calls: []
-  SensorEvents:
-    OnSlideTouched:
-      m_PersistentCalls:
-        m_Calls: []
-    OnSlideUntouched:
-      m_PersistentCalls:
-        m_Calls: []
-    OnReloadTouched:
-      m_PersistentCalls:
-        m_Calls: []
-    OnReloadUntouched:
-      m_PersistentCalls:
-        m_Calls: []
-    OnForwardBarGripTouched:
-      m_PersistentCalls:
-        m_Calls: []
-    OnForwardBarGripUntouched:
-      m_PersistentCalls:
-        m_Calls: []
-    OnUnderTouchpadGripTouched:
-      m_PersistentCalls:
-        m_Calls: []
-    OnUnderTouchpadGripUntouched:
-      m_PersistentCalls:
-        m_Calls: []
-    OnFrontHandGripTouched:
-      m_PersistentCalls:
-        m_Calls: []
-    OnFrontHandGripUntouched:
-      m_PersistentCalls:
-        m_Calls: []
-    OnFrontHandGripFaceTouched:
-      m_PersistentCalls:
-        m_Calls: []
-    OnFrontHandGripFaceUntouched:
-      m_PersistentCalls:
-        m_Calls: []
-    OnTriggerGripTouched:
-      m_PersistentCalls:
-        m_Calls: []
-    OnTriggerGripUntouched:
-      m_PersistentCalls:
-        m_Calls: []
-  GestureEvents:
-    OnForwardBarGripSwipeForward:
-      m_PersistentCalls:
-        m_Calls: []
-    OnForwardBarGripSwipeBackward:
-      m_PersistentCalls:
-        m_Calls: []
-    OnUnderTouchpadSwipeForward:
-      m_PersistentCalls:
-        m_Calls: []
-    OnUnderTouchpadSwipeBackward:
-      m_PersistentCalls:
-        m_Calls: []
-    OnUnderTouchpadPump:
-      m_PersistentCalls:
-        m_Calls: []
-    OnSlideSwipeForward:
-      m_PersistentCalls:
-        m_Calls: []
-    OnSlideSwipeBackward:
-      m_PersistentCalls:
-        m_Calls: []
-    OnReloadSwipeForward:
-      m_PersistentCalls:
-        m_Calls: []
-    OnReloadSwipeBackward:
-      m_PersistentCalls:
-        m_Calls: []
-    OnGesture:
-      m_PersistentCalls:
-        m_Calls: []
---- !u!114 &1252191332597432890
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 7472680712364335062}
-  m_Enabled: 1
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 0f5017b8552ced944bb108f95ad8f579, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: StrikerLink.Unity.Runtime::StrikerLink.Unity.Runtime.Core.StrikerController
-  autoConnect: 1
-  overrideConnection: 0
-  overrideIp: 127.0.0.1
-  overridePort: 5060
-  logLevel: 7
-  libraryPrefix: myStrikerApp_
-  hapticLibraries: []
-  OnClientConnected:
-    m_PersistentCalls:
-      m_Calls: []
-  OnClientDisconnected:
-    m_PersistentCalls:
-      m_Calls: []
-  OnConnectionFailed:
-    m_PersistentCalls:
-      m_Calls: []
 --- !u!114 &-6458842020520027819
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -552,8 +378,6 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: b1f8342e017540a6a1bd5ab1a4d3e7a5, type: 3}
   m_Name: 
   m_EditorClassIdentifier: VboBase.Runtime::VBO_Ultimate.Runtime.Scripts.Input.StrikerHaptics
-  _striker: {fileID: 0}
-  Library: []
 --- !u!114 &57677008285412191
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -569,6 +393,7 @@ MonoBehaviour:
   corner: 3
   margin: {x: 12, y: 125}
   size: {x: 160, y: 155}
+  scaleFactor: 1
 --- !u!1 &8894108400211792406
 GameObject:
   m_ObjectHideFlags: 0

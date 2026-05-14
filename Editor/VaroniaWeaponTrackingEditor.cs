@@ -392,6 +392,11 @@ namespace VaroniaBackOffice
             GUILayout.Space(8);
 
             // ── Tracking status card ──
+            // Force-lost = override externe via TrackingSuppressionZone (holster, caisse, etc.)
+            // Distingué visuellement du tracking hardware perdu (rouge vs orange).
+            bool externalForceLost = script.ExternalForceLost;
+            bool hardwareIsTracking = hasTracker && script.trackerFollower != null && script.trackerFollower.isTracking;
+
             Color trackColor = isTracking ? new Color(0.2f, 0.9f, 0.4f, 1f) : new Color(0.9f, 0.25f, 0.25f, 1f);
             DrawCard(() =>
             {
@@ -399,6 +404,7 @@ namespace VaroniaBackOffice
                 DrawDivider();
                 GUILayout.Space(6);
 
+                // Ligne principale
                 EditorGUILayout.BeginHorizontal();
                 GUILayout.FlexibleSpace();
                 Rect dotRect = GUILayoutUtility.GetRect(10, 10, GUILayout.Width(10), GUILayout.Height(10));
@@ -414,9 +420,31 @@ namespace VaroniaBackOffice
                 GUILayout.FlexibleSpace();
                 EditorGUILayout.EndHorizontal();
 
+                // Ligne secondaire : FORCE TRACKING PERDU (orange) si override actif
+                if (externalForceLost)
+                {
+                    GUILayout.Space(2);
+                    EditorGUILayout.BeginHorizontal();
+                    GUILayout.FlexibleSpace();
+                    Rect forceDot = GUILayoutUtility.GetRect(8, 8, GUILayout.Width(8), GUILayout.Height(8));
+                    EditorGUI.DrawRect(new Rect(forceDot.x, forceDot.y + 3, 8, 8), colWarn);
+                    GUILayout.Space(6);
+                    GUIStyle forceStyle = new GUIStyle(EditorStyles.boldLabel)
+                    {
+                        fontSize = 9,
+                        normal   = { textColor = colWarn }
+                    };
+                    string forceSub = hardwareIsTracking
+                        ? "↳ FORCE TRACKING PERDU (zone)"
+                        : "↳ FORCE TRACKING PERDU (zone + hardware)";
+                    GUILayout.Label(forceSub, forceStyle);
+                    GUILayout.FlexibleSpace();
+                    EditorGUILayout.EndHorizontal();
+                }
+
                 GUILayout.Space(4);
 
-            }, hasTracker ? trackColor : colTextSecond);
+            }, externalForceLost ? colWarn : (hasTracker ? trackColor : colTextSecond));
 
             GUILayout.Space(8);
             GUILayout.Label("Varonia Back Office  ·  VaroniaWeaponTracking", footerStyle);

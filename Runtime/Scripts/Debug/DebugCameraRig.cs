@@ -1,4 +1,5 @@
 ﻿using UnityEngine;
+using UnityEngine.SceneManagement;
 #if ENABLE_INPUT_SYSTEM
 using UnityEngine.InputSystem;
 #endif
@@ -32,14 +33,7 @@ namespace VaroniaBackOffice
 
         private void Reset()
         {
-            cam = Camera.main;
-            if (cam != null)
-            {
-                // Remonte jusqu'au root du rig (parent le plus haut)
-                Transform t = cam.transform;
-                while (t.parent != null) t = t.parent;
-                rig = t;
-            }
+            AutoFillReferences();
         }
 
         private void Awake()
@@ -47,15 +41,42 @@ namespace VaroniaBackOffice
             AutoFillReferences();
         }
 
+        private void OnEnable()
+        {
+            SceneManager.sceneLoaded += OnSceneLoaded;
+        }
+
+        private void OnDisable()
+        {
+            SceneManager.sceneLoaded -= OnSceneLoaded;
+        }
+
+        private void OnSceneLoaded(Scene _, LoadSceneMode __)
+        {
+            // Les refs d'une scène précédente sont périmées : on force la recherche.
+            rig = null;
+            cam = null;
+            AutoFillReferences();
+        }
+
         private void AutoFillReferences()
         {
-            if (cam == null) cam = Camera.main;
-            if (rig == null && cam != null) rig = cam.transform.root;
+            if (rig == null)
+            {
+                var sync = FindObjectOfType<VaroniaSync>();
+                if (sync != null) rig = sync.transform;
+            }
+            if (cam == null)
+            {
+                cam = Camera.main;
+                if (cam == null && rig != null) cam = rig.GetComponentInChildren<Camera>();
+            }
         }
 
         private void Update()
         {
             if (rig == null || cam == null) AutoFillReferences();
+            if (rig == null) return;
             if (!DebugModeOverlay.IsSuperDebugMode) return;
 
             float dt    = Time.deltaTime;
@@ -90,13 +111,30 @@ namespace VaroniaBackOffice
             if (move.sqrMagnitude > 0.001f)
                 rig.position += move.normalized * speed * dt;
 
-            // ── Rotation (A/E) ──
+            // ── Rotation (A/E) — pivot autour de la caméra ──
             float rot = 0f;
             if (IsKey(AKey())) rot -= rotateSpeed * dt;
             if (IsKey(EKey())) rot += rotateSpeed * dt;
 
             if (rot != 0f)
-                rig.Rotate(Vector3.up, rot, Space.World);
+            {
+                if (cam != null)
+                {
+                    // On applique la delta-rotation à la fois à la position (offset rig→cam
+                    // tourné autour du pivot caméra) et à la rotation du rig. Comme ça la
+                    // caméra reste visuellement au même point pendant le yaw.
+                    Vector3    pivot    = cam.transform.position;
+                    Quaternion deltaRot = Quaternion.AngleAxis(rot, Vector3.up);
+
+                    Vector3 offset = rig.position - pivot;
+                    rig.position = pivot + deltaRot * offset;
+                    rig.rotation = deltaRot * rig.rotation;
+                }
+                else
+                {
+                    rig.Rotate(Vector3.up, rot, Space.World);
+                }
+            }
 
             // ── Reset position/rotation via T ──
             if (IsKeyDown(TKey()))

@@ -338,11 +338,11 @@ namespace VaroniaBackOffice
                         padding   = new RectOffset(0, 0, 8, 4),
                         wordWrap  = true,
                     };
-                    GUILayout.Label("Type 'GlobalConfig' introuvable", warnTitleStyle);
+                    GUILayout.Label("Type 'GlobalConfig' not found", warnTitleStyle);
                     var subStyle = new GUIStyle(footerStyle) { normal = { textColor = colTextSecond } };
-                    GUILayout.Label("Assurez-vous que le package est compilé.", subStyle);
+                    GUILayout.Label("Make sure the package is compiled.", subStyle);
                     EditorGUILayout.Space(8);
-                    if (GUILayout.Button("RAFRAÎCHIR", buttonStyle, GUILayout.Height(32)))
+                    if (GUILayout.Button("REFRESH", buttonStyle, GUILayout.Height(32)))
                         Refresh();
                 }, colWarn);
 
@@ -356,7 +356,7 @@ namespace VaroniaBackOffice
             // ── Known fields card ──
             DrawCard(() =>
             {
-                DrawSectionLabel("CHAMPS CONNUS  ·  RÉFLEXION");
+                DrawSectionLabel("KNOWN FIELDS  ·  REFLECTION");
                 EditorGUILayout.Space(4);
                 DrawDivider();
                 EditorGUILayout.Space(6);
@@ -370,7 +370,7 @@ namespace VaroniaBackOffice
             {
                 DrawCard(() =>
                 {
-                    DrawSectionLabel("CHAMPS SUPPLÉMENTAIRES  ·  JSON UNIQUEMENT");
+                    DrawSectionLabel("EXTRA FIELDS  ·  JSON ONLY");
                     EditorGUILayout.Space(4);
                     DrawDivider();
                     EditorGUILayout.Space(6);
@@ -383,7 +383,7 @@ namespace VaroniaBackOffice
             // ── Add field card ──
             DrawCard(() =>
             {
-                DrawSectionLabel("AJOUTER UN CHAMP");
+                DrawSectionLabel("ADD FIELD");
                 EditorGUILayout.Space(4);
                 DrawDivider();
                 EditorGUILayout.Space(6);
@@ -399,16 +399,72 @@ namespace VaroniaBackOffice
 
         // ─── Known fields ─────────────────────────────────────────────────────────
 
+        // Nom des champs considérés comme "legacy" — affichés tout en bas avec un séparateur.
+        private static readonly HashSet<string> LegacyFieldNames = new HashSet<string>
+        {
+            "Controller",
+            "WeaponMAC",
+        };
+
         private void DrawKnownFields()
         {
+            // 1. Champs principaux
             foreach (var field in _knownFields)
+            {
+                if (LegacyFieldNames.Contains(field.Name)) continue;
                 DrawReflectedField(field);
+            }
+
+            // 2. Section "LEGACY" en bas (si au moins un champ legacy existe)
+            bool hasLegacy = false;
+            foreach (var f in _knownFields)
+                if (LegacyFieldNames.Contains(f.Name)) { hasLegacy = true; break; }
+
+            if (!hasLegacy) return;
+
+            EditorGUILayout.Space(10);
+
+            // Header LEGACY (warn-coloured pour bien marquer)
+            EditorGUILayout.BeginHorizontal();
+            var legacyHeaderStyle = new GUIStyle(sectionStyle);
+            legacyHeaderStyle.normal.textColor = colWarn;
+            GUILayout.Label("LEGACY  ·  SINGLE WEAPON  (use Devices instead)", legacyHeaderStyle);
+            GUILayout.FlexibleSpace();
+            EditorGUILayout.EndHorizontal();
+
+            // Petit divider warn
+            Rect r = GUILayoutUtility.GetRect(1, 1);
+            r.x += 20;
+            r.width -= 40;
+            EditorGUI.DrawRect(r, new Color(colWarn.r, colWarn.g, colWarn.b, 0.25f));
+
+            EditorGUILayout.Space(4);
+
+            // 3. Champs legacy, dans un ordre explicite (Controller puis WeaponMAC)
+            foreach (var name in new[] { "Controller", "WeaponMAC" })
+            {
+                foreach (var field in _knownFields)
+                {
+                    if (field.Name == name)
+                    {
+                        DrawReflectedField(field);
+                        break;
+                    }
+                }
+            }
         }
 
         private void DrawReflectedField(FieldInfo field)
         {
             var value = field.GetValue(_configObj);
             var type  = field.FieldType;
+
+            // ── Cas spécial : liste typée de WeaponBinding (nouveau système multi-armes) ──
+            if (type == typeof(List<WeaponBinding>))
+            {
+                DrawWeaponBindingList(field, value as List<WeaponBinding>);
+                return;
+            }
 
             EditorGUI.BeginChangeCheck();
             object newValue;
@@ -455,6 +511,178 @@ namespace VaroniaBackOffice
                 field.SetValue(_configObj, newValue);
                 _isDirty = true;
             }
+        }
+
+        // ─── WeaponBinding list (nouveau système multi-armes) ────────────────────
+
+        private void DrawWeaponBindingList(FieldInfo field, List<WeaponBinding> list)
+        {
+            if (list == null)
+            {
+                list = new List<WeaponBinding>();
+                field.SetValue(_configObj, list);
+                _isDirty = true;
+            }
+
+            // ── Header : nom + badge "X armes" (+ warning si mismatch avec VaroniaRuntimeSettings.weaponCount) ──
+            int expected = -1;
+            try
+            {
+                var settings = VaroniaRuntimeSettings.Load();
+                if (settings != null) expected = Mathf.Max(1, settings.weaponCount);
+            }
+            catch { /* settings absent : pas de check */ }
+
+            EditorGUILayout.BeginHorizontal();
+            GUILayout.Label(field.Name, fieldLabelStyle, GUILayout.Width(150));
+
+            string countLabel = $"  {list.Count} weapon{(list.Count > 1 ? "s" : "")}  ";
+            var countStyle = new GUIStyle(badgeStyle);
+            GUILayout.Label(countLabel, countStyle);
+
+            if (expected > 0 && list.Count != expected && list.Count > 0)
+            {
+                var warnStyle = new GUIStyle(badgeStyle);
+                warnStyle.normal.textColor  = colWarn;
+                warnStyle.normal.background = MakeRoundedTex(32, 32, colWarnDim, 4);
+                GUILayout.Label($"  ≠ RuntimeSettings ({expected})  ", warnStyle);
+            }
+            else if (list.Count == 0)
+            {
+                var fallbackStyle = new GUIStyle(badgeStyle);
+                fallbackStyle.normal.textColor  = colTextSecond;
+                fallbackStyle.normal.background = MakeRoundedTex(32, 32, new Color(0.4f, 0.4f, 0.4f, 0.15f), 4);
+                GUILayout.Label("  empty → legacy system  ", fallbackStyle);
+            }
+
+            GUILayout.FlexibleSpace();
+            EditorGUILayout.EndHorizontal();
+
+            EditorGUILayout.Space(4);
+
+            // ── Header de colonnes (si au moins une entrée) ──
+            if (list.Count > 0)
+            {
+                var colHeaderStyle = new GUIStyle(fieldLabelStyle)
+                {
+                    fontSize = 9,
+                    normal = { textColor = colTextMuted },
+                };
+                EditorGUILayout.BeginHorizontal();
+                GUILayout.Label("",            colHeaderStyle, GUILayout.Width(30));
+                GUILayout.Label("Controller",   colHeaderStyle);
+                GUILayout.Label("Serial",       colHeaderStyle);
+                GUILayout.Label("Tracking ID",  colHeaderStyle);
+                GUILayout.Label("Force Steam",  colHeaderStyle, GUILayout.Width(70));
+                GUILayout.Label("",            colHeaderStyle, GUILayout.Width(24));
+                EditorGUILayout.EndHorizontal();
+            }
+
+            // ── Lignes : [index] [Controller dropdown] [SerialNumber] [TrackingId] [✕] ──
+            int toRemove = -1;
+            var controllerValues = Enum.GetValues(typeof(Controller));
+            var controllerNames  = Enum.GetNames(typeof(Controller));
+            string[] controllerLabels = new string[controllerNames.Length];
+            for (int i = 0; i < controllerNames.Length; i++)
+            {
+                int iv = (int)controllerValues.GetValue(i);
+                controllerLabels[i] = $"{controllerNames[i]} ({iv})";
+            }
+
+            for (int i = 0; i < list.Count; i++)
+            {
+                var entry = list[i] ?? (list[i] = new WeaponBinding());
+
+                EditorGUILayout.BeginHorizontal();
+
+                // Index badge
+                var idxStyle = new GUIStyle(badgeStyle);
+                idxStyle.alignment = TextAnchor.MiddleCenter;
+                GUILayout.Label($"#{i}", idxStyle, GUILayout.Width(30));
+
+                // Controller dropdown
+                int curIdx = Array.IndexOf(controllerValues, entry.Controller);
+                EditorGUI.BeginChangeCheck();
+                int nextIdx = EditorGUILayout.Popup(Mathf.Max(curIdx, 0), controllerLabels);
+                if (EditorGUI.EndChangeCheck())
+                {
+                    entry.Controller = (Controller)controllerValues.GetValue(nextIdx);
+                    _isDirty = true;
+                }
+
+                // SerialNumber textfield
+                EditorGUI.BeginChangeCheck();
+                string nextSerial = EditorGUILayout.TextField(entry.SerialNumber ?? "");
+                if (EditorGUI.EndChangeCheck())
+                {
+                    entry.SerialNumber = nextSerial;
+                    _isDirty = true;
+                }
+
+                // TrackingId textfield
+                EditorGUI.BeginChangeCheck();
+                string nextTrackingId = EditorGUILayout.TextField(entry.TrackingId ?? "");
+                if (EditorGUI.EndChangeCheck())
+                {
+                    entry.TrackingId = nextTrackingId;
+                    _isDirty = true;
+                }
+
+                // ForceSteamId intfield (fixed width)
+                EditorGUI.BeginChangeCheck();
+                int nextForceSteamId = EditorGUILayout.IntField(entry.ForceSteamId, GUILayout.Width(70));
+                if (EditorGUI.EndChangeCheck())
+                {
+                    entry.ForceSteamId = nextForceSteamId;
+                    _isDirty = true;
+                }
+
+                // Remove button
+                var removeStyle = new GUIStyle(buttonStyle)
+                {
+                    fontSize = 10,
+                    padding  = new RectOffset(4, 4, 3, 3),
+                };
+                removeStyle.normal.background = MakeRoundedTex(32, 32, colErrorDim, 4);
+                removeStyle.normal.textColor  = colError;
+                removeStyle.hover.textColor   = Color.white;
+                if (GUILayout.Button("✕", removeStyle, GUILayout.Width(24), GUILayout.Height(20)))
+                    toRemove = i;
+
+                EditorGUILayout.EndHorizontal();
+                EditorGUILayout.Space(2);
+            }
+
+            if (toRemove >= 0)
+            {
+                list.RemoveAt(toRemove);
+                _isDirty = true;
+            }
+
+            // ── Bouton "+" pour ajouter une arme ──
+            EditorGUILayout.Space(4);
+            EditorGUILayout.BeginHorizontal();
+            GUILayout.Space(150);
+
+            var addStyle = new GUIStyle(buttonStyle)
+            {
+                fontSize = 10,
+                padding  = new RectOffset(8, 8, 4, 4),
+            };
+            addStyle.normal.background = MakeRoundedTex(32, 32, colAccentDim, 4);
+            addStyle.normal.textColor  = colAccent;
+            addStyle.hover.textColor   = Color.white;
+            addStyle.active.background = texAccentSolid;
+
+            if (GUILayout.Button("+ ADD WEAPON", addStyle, GUILayout.Height(22)))
+            {
+                list.Add(new WeaponBinding());
+                _isDirty = true;
+            }
+            GUILayout.FlexibleSpace();
+            EditorGUILayout.EndHorizontal();
+
+            EditorGUILayout.Space(4);
         }
 
         // ─── Extra fields ─────────────────────────────────────────────────────────
@@ -515,7 +743,7 @@ namespace VaroniaBackOffice
         private void DrawAddField()
         {
             EditorGUILayout.BeginHorizontal();
-            GUILayout.Label("Nom", fieldLabelStyle, GUILayout.Width(45));
+            GUILayout.Label("Name", fieldLabelStyle, GUILayout.Width(45));
             _newKey     = EditorGUILayout.TextField(_newKey);
             _newTypeIdx = EditorGUILayout.Popup(_newTypeIdx, TypeLabels, GUILayout.Width(70));
             EditorGUILayout.EndHorizontal();
@@ -523,7 +751,7 @@ namespace VaroniaBackOffice
             EditorGUILayout.Space(4);
 
             EditorGUILayout.BeginHorizontal();
-            GUILayout.Label("Valeur", fieldLabelStyle, GUILayout.Width(45));
+            GUILayout.Label("Value", fieldLabelStyle, GUILayout.Width(45));
             if (TypeLabels[_newTypeIdx] == "bool")
                 _newBoolValue = EditorGUILayout.Toggle(_newBoolValue);
             else
@@ -546,7 +774,7 @@ namespace VaroniaBackOffice
             }
 
             GUI.enabled = canAdd;
-            if (GUILayout.Button("+ AJOUTER LE CHAMP", addStyle, GUILayout.Height(30)))
+            if (GUILayout.Button("+ ADD FIELD", addStyle, GUILayout.Height(30)))
             {
                 string typeLabel = TypeLabels[_newTypeIdx];
                 _extraFields[_newKey] = typeLabel == "bool"
@@ -567,7 +795,7 @@ namespace VaroniaBackOffice
             EditorGUILayout.BeginHorizontal();
             GUILayout.Space(16);
 
-            if (GUILayout.Button("RAFRAÎCHIR", buttonStyle, GUILayout.Height(34), GUILayout.MinWidth(110)))
+            if (GUILayout.Button("REFRESH", buttonStyle, GUILayout.Height(34), GUILayout.MinWidth(110)))
                 Refresh();
 
             GUILayout.FlexibleSpace();
@@ -579,7 +807,7 @@ namespace VaroniaBackOffice
             saveStyle.hover.textColor   = Color.white;
             saveStyle.active.background = _isDirty ? texWarnSolid : texAccentSolid;
 
-            string saveLabel = _isDirty ? "  SAUVEGARDER  ●" : "  SAUVEGARDER";
+            string saveLabel = _isDirty ? "  SAVE  ●" : "  SAVE";
             if (GUILayout.Button(saveLabel, saveStyle, GUILayout.Height(34), GUILayout.MinWidth(150)))
                 SaveToJson();
 

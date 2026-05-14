@@ -26,11 +26,15 @@ namespace VaroniaBackOffice
 
         public void Load()
         {
-            string path = Path.Combine(
-                Application.persistentDataPath
-                    .Replace(Application.companyName + "/" + Application.productName, "Varonia"),
-                "NewSpatial.json"
-            );
+#if UNITY_ANDROID && !UNITY_EDITOR
+            // Android device : meme dossier partage entre apps Varonia que GlobalConfig.json
+            string rootPath = "/storage/emulated/0/Varonia";
+#else
+            // Desktop / Editor : path Varonia partage entre apps via le pattern persistentDataPath
+            string rootPath = Application.persistentDataPath
+                .Replace(Application.companyName + "/" + Application.productName, "Varonia");
+#endif
+            string path = Path.Combine(rootPath, "NewSpatial.json");
 
             if (!File.Exists(path))
             {
