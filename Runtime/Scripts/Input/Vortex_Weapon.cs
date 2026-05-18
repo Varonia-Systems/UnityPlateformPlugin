@@ -187,24 +187,40 @@ public class Vortex_Weapon : _Weapon
     }
 
 #if OFFICIELOPENVR
-    
+
+    [Header("SteamVR Action Mapping")]
+    [SerializeField] private string actionSetName   = "default";
+    [SerializeField] private string triggerAxisName = "Squeeze";   // SteamVR_Action_Single
+    [SerializeField] private string gripButtonName  = "GrabGrip";  // SteamVR_Action_Boolean
+
     public SteamVR_Input_Sources inputSource = SteamVR_Input_Sources.Any;
-    
+
+    private SteamVR_Action_Single  _triggerAxis;
+    private SteamVR_Action_Boolean _gripButton;
+    private bool _actionsResolved;
+
+    private void ResolveSteamVRActions()
+    {
+        _triggerAxis = SteamVR_Input.GetAction<SteamVR_Action_Single> (actionSetName, triggerAxisName, false);
+        _gripButton  = SteamVR_Input.GetAction<SteamVR_Action_Boolean>(actionSetName, gripButtonName,  false);
+
+        if (_triggerAxis == null)
+            Debug.LogWarning($"<color=orange>[Vortex]</color> Action '{actionSetName}/{triggerAxisName}' introuvable dans actions.json — triggerValue restera à 0.");
+        if (_gripButton == null)
+            Debug.LogWarning($"<color=orange>[Vortex]</color> Action '{actionSetName}/{gripButtonName}' introuvable dans actions.json — gripValue restera à 0.");
+
+        _actionsResolved = true;
+    }
+
     private void UpdateSteamVR()
     {
-        if (SteamVR_Actions._default.Squeeze != null)
-        {
-            triggerValue = SteamVR_Actions._default.Squeeze.GetAxis(inputSource);
-            
-            
-            bool isPressed = false;
-            
-            isPressed = SteamVR_Actions._default.GrabGrip.GetState(inputSource);
-            
-            gripValue = isPressed ? 1.0f : 0.0f;
-            
-        }
-        
+        if (!_actionsResolved) ResolveSteamVRActions();
+
+        if (_triggerAxis != null)
+            triggerValue = _triggerAxis.GetAxis(inputSource);
+
+        if (_gripButton != null)
+            gripValue = _gripButton.GetState(inputSource) ? 1f : 0f;
     }
 #endif
 
