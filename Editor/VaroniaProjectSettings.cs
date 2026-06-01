@@ -666,11 +666,39 @@ namespace VaroniaBackOffice
             GUILayout.Space(4);
 
             // ── Sauvegarde ───────────────────────────────────────────────────────
+            // Avant : AssetDatabase.SaveAssets() était appelé à chaque ApplyModifiedProperties()
+            // → lag énorme en tapant dans un TextField (re-save de tous les assets dirty à
+            // chaque keystroke). On marque juste dirty maintenant — Unity sauvegarde au prochain
+            // Ctrl+S / scene change / fermeture projet. Pour garder un "auto-save", on planifie
+            // un SaveAssets() débouncé via EditorApplication.update (1s après le dernier edit).
             if (so.ApplyModifiedProperties())
             {
                 EditorUtility.SetDirty(settings);
-                AssetDatabase.SaveAssets();
+                ScheduleDebouncedSave();
             }
+        }
+
+        // ── Debounced SaveAssets ─────────────────────────────────────────────────
+        private static double _lastEditTime;
+        private static bool   _savePending;
+
+        private static void ScheduleDebouncedSave()
+        {
+            _lastEditTime = EditorApplication.timeSinceStartup;
+            if (_savePending) return;
+            _savePending = true;
+            EditorApplication.update += DebouncedSaveTick;
+        }
+
+        private static void DebouncedSaveTick()
+        {
+            // 1s sans nouvelle édition → flush SaveAssets() une fois et on se désabonne.
+            const double debounceSeconds = 1.0;
+            if (EditorApplication.timeSinceStartup - _lastEditTime < debounceSeconds) return;
+
+            EditorApplication.update -= DebouncedSaveTick;
+            _savePending = false;
+            AssetDatabase.SaveAssets();
         }
 
         // ─── Composants UI ────────────────────────────────────────────────────────

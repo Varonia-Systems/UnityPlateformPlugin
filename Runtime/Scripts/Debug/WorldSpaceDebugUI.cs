@@ -24,7 +24,11 @@ namespace VaroniaBackOffice
         [Tooltip("Largeur du canvas en unités monde.")]
         [SerializeField] private float canvasWorldWidth = 1.4f;
         [Tooltip("Hauteur du canvas en unités monde.")]
+        // Champ serialise conserve dans l'Inspector mais pas encore lu par le code de
+        // dimensionnement du canvas -> on supprime le warning CS0414 sans perdre la valeur.
+#pragma warning disable 0414
         [SerializeField] private float canvasWorldHeight = 0.9f;
+#pragma warning restore 0414
         [Tooltip("Résolution de rendu du canvas (pixels).")]
         [SerializeField] private Vector2Int canvasResolution = new Vector2Int(1400, 900);
         [Tooltip("Offset vertical par rapport au centre de la caméra.")]
@@ -35,6 +39,8 @@ namespace VaroniaBackOffice
         [SerializeField] private bool  alwaysFaceCamera = true;
         [Tooltip("Si true, le canvas s'affiche toujours au-dessus de la géométrie 3D (ZTest Always).")]
         [SerializeField] private bool  alwaysOnTop = true;
+        [Tooltip("Layer sur lequel placer le canvas de debug et tous ses enfants. Défaut : UI.")]
+        [SerializeField] private string canvasLayer = "UI";
 
         [Header("Panels")]
         [SerializeField] private float panelPadding   = 12f;
@@ -149,7 +155,11 @@ namespace VaroniaBackOffice
 
         private static MonoBehaviour FindOfType(string fullTypeName)
         {
+#if UNITY_2022_2_OR_NEWER
+            var all = FindObjectsByType<MonoBehaviour>(FindObjectsSortMode.None);
+#else
             var all = FindObjectsOfType<MonoBehaviour>();
+#endif
             foreach (var mb in all)
             {
                 if (mb.GetType().FullName == fullTypeName)
@@ -205,6 +215,24 @@ namespace VaroniaBackOffice
 
             if (alwaysOnTop)
                 ApplyAlwaysOnTop();
+
+            // Place le canvas et tous ses enfants sur le layer choisi (défaut : UI)
+            ApplyLayerRecursive(go, canvasLayer);
+        }
+
+        private static void ApplyLayerRecursive(GameObject root, string layerName)
+        {
+            if (root == null || string.IsNullOrEmpty(layerName)) return;
+
+            int layer = LayerMask.NameToLayer(layerName);
+            if (layer < 0)
+            {
+                Debug.LogWarning($"[WorldSpaceDebugUI] Layer \"{layerName}\" introuvable. Le canvas reste sur Default.");
+                return;
+            }
+
+            foreach (var t in root.GetComponentsInChildren<Transform>(true))
+                t.gameObject.layer = layer;
         }
 
         // ─── Always On Top ────────────────────────────────────────────────────────

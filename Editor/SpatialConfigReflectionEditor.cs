@@ -310,6 +310,7 @@ namespace VaroniaBackOffice
 
             LoadExtraFields();
             _isDirty = false;
+            CaptureGhostSnapshot(); // baseline ghost reference = freshly-loaded state
         }
 
         private void LoadExtraFields()
@@ -756,6 +757,7 @@ namespace VaroniaBackOffice
 
             File.WriteAllText(_savePath, jObj.ToString(Formatting.Indented));
             _isDirty = false;
+            CaptureGhostSnapshot(); // saved state is the new ghost reference → ghosts clear
             Debug.Log($"[SpatialConfig Editor] Sauvegardé → {_savePath}");
         }
 

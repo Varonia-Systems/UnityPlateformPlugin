@@ -74,7 +74,6 @@ namespace VaroniaBackOffice
         private float _sceneLoadStartTime;
         private string _targetSceneName;
         private float _lastLoadDuration;
-        private bool _isCurrentlyLoading = false;
         private float _lastUpdateTime;
 
         // FDP Debug UI
@@ -122,7 +121,6 @@ namespace VaroniaBackOffice
 
         private void OnSceneUnloaded(Scene scene)
         {
-            _isCurrentlyLoading = true;
             _sceneLoadStartTime = Time.realtimeSinceStartup;
             Debug.Log($"#[BackOfficeVaronia] Scene transition started (unloading: {scene.name})...");
             _lastUpdateTime = Time.realtimeSinceStartup;
@@ -143,7 +141,6 @@ namespace VaroniaBackOffice
 
         //    Debug.Log($"#[BackOfficeVaronia] Scene Loaded: {scene.name} (Load took {_lastLoadDuration:F2}s)");
 
-            _isCurrentlyLoading = false;
             _lastUpdateTime = currentTime;
         }
 
@@ -302,7 +299,11 @@ namespace VaroniaBackOffice
         /// Loads the config from JSON. If the file doesn't exist, it creates a new one with default values.
         /// </summary>
         // Flag pour eviter de demander la permission en boucle si l'utilisateur revient sans avoir grante
+        // Declaration guardee : ce flag n'est lu/ecrit que dans le bloc Android (cf. OnApplicationFocus
+        // et LoadConfig), donc hors Android il declencherait un warning CS0414 "assigned but never used".
+#if UNITY_ANDROID && !UNITY_EDITOR
         private static bool _waitingForAndroidPermission = false;
+#endif
 
         public void LoadConfig()
         {

@@ -40,6 +40,11 @@ namespace VaroniaBackOffice
         // ── Textures ──────────────────────────────────────────────────────────────
         static Texture2D texBtn, texBtnHover, texAccentSolid, texWarnSolid, texCard;
         static Texture2D texAccentDim, texWarnDim, texErrorDim, texDivider;
+        // Cached per-state backgrounds — previously allocated via MakeRoundedTex on
+        // every OnInspectorGUI repaint and never destroyed, leaking one Texture2D
+        // (a native, non-GC UnityEngine.Object) per frame → hundreds of MB just by
+        // having this inspector selected while the mouse moved over it.
+        static Texture2D texPillAccent, texPillMuted, texWarnBtn, texErrBtn, texErrBtnActive;
 
         // ─────────────────────────────────────────────────────────────────────────
 
@@ -97,6 +102,13 @@ namespace VaroniaBackOffice
             texBtnHover    = MakeRoundedTex(32, 32, colBtnHover, 5);
             texAccentSolid = MakeRoundedTex(32, 32, colAccent, 5);
             texWarnSolid   = MakeRoundedTex(32, 32, colWarn, 5);
+
+            // Status-pill + debug-button backgrounds (built once, reused every repaint).
+            texPillAccent   = MakeRoundedTex(32, 32, new Color(colAccent.r,    colAccent.g,    colAccent.b,    0.15f), 6);
+            texPillMuted    = MakeRoundedTex(32, 32, new Color(colTextMuted.r, colTextMuted.g, colTextMuted.b, 0.15f), 6);
+            texWarnBtn      = MakeRoundedTex(32, 32, colWarnDim, 5);
+            texErrBtn       = MakeRoundedTex(32, 32, colErrorDim, 5);
+            texErrBtnActive = MakeRoundedTex(32, 32, colError, 5);
 
             headerStyle = new GUIStyle
             {
@@ -200,7 +212,7 @@ namespace VaroniaBackOffice
             string pillTxt  = isPlaying ? "  PLAYING  " : "  OFFLINE  ";
             var   pill      = new GUIStyle(tagStyle);
             pill.normal.textColor  = pillCol;
-            pill.normal.background = MakeRoundedTex(32, 32, new Color(pillCol.r, pillCol.g, pillCol.b, 0.15f), 6);
+            pill.normal.background = isPlaying ? texPillAccent : texPillMuted;
             GUILayout.Label(pillTxt, pill);
 
             GUILayout.Space(12);
@@ -344,7 +356,7 @@ namespace VaroniaBackOffice
                         EditorGUILayout.BeginHorizontal();
 
                         var warnBtn = new GUIStyle(buttonStyle);
-                        warnBtn.normal.background = MakeRoundedTex(32, 32, colWarnDim, 5);
+                        warnBtn.normal.background = texWarnBtn;
                         warnBtn.normal.textColor  = colWarn;
                         warnBtn.hover.textColor   = Color.white;
                         warnBtn.active.background = texWarnSolid;
@@ -381,10 +393,10 @@ namespace VaroniaBackOffice
                     GUILayout.Space(8);
 
                     var errBtn = new GUIStyle(buttonStyle);
-                    errBtn.normal.background = MakeRoundedTex(32, 32, colErrorDim, 5);
+                    errBtn.normal.background = texErrBtn;
                     errBtn.normal.textColor  = colError;
                     errBtn.hover.textColor   = Color.white;
-                    errBtn.active.background = MakeRoundedTex(32, 32, colError, 5);
+                    errBtn.active.background = texErrBtnActive;
 
 #if STEAMVR_ENABLED
                     bool initialized = SteamVRBridge.InitializedByUs;

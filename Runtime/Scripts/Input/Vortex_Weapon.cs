@@ -49,7 +49,11 @@ public class Vortex_Weapon : _Weapon
             if (state == UnityEditor.PlayModeStateChange.ExitingPlayMode)
             {
                 _dead = true;
+#if UNITY_2022_2_OR_NEWER
+                foreach (var weapon in FindObjectsByType<Vortex_Weapon>(FindObjectsSortMode.None))
+#else
                 foreach (var weapon in FindObjectsOfType<Vortex_Weapon>())
+#endif
                 {
 #if STEAMVR_ENABLED
                     weapon._vrSystem = null;

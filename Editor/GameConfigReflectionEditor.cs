@@ -21,6 +21,12 @@ namespace VaroniaBackOffice
         // Extra fields (JSON keys not present in the class)
         private readonly Dictionary<string, JToken> _extraFields = new Dictionary<string, JToken>();
 
+        // Parsed config JSON from the last refresh (null if no file). Exposed to addons.
+        private JObject _loadedJson;
+
+        // Keys claimed by addons — excluded from the generic extra-fields card.
+        private readonly HashSet<string> _claimedKeys = new HashSet<string>();
+
         // "Add field" form state
         private string _newKey       = "";
         private string _newValue     = "";
@@ -225,6 +231,8 @@ namespace VaroniaBackOffice
             _configObj   = null;
             _knownFields = null;
             _extraFields.Clear();
+            _loadedJson  = null;
+            _claimedKeys.Clear();
 
             // Search for GameConfig by simple name across all loaded assemblies
             Type configType = null;
@@ -255,11 +263,11 @@ namespace VaroniaBackOffice
             {
                 try
                 {
-                    var jObj = JObject.Parse(File.ReadAllText(_savePath));
+                    _loadedJson = JObject.Parse(File.ReadAllText(_savePath));
                     _configObj = Activator.CreateInstance(configType);
                     foreach (var field in _knownFields)
                     {
-                        if (!jObj.TryGetValue(field.Name, out JToken token)) continue;
+                        if (!_loadedJson.TryGetValue(field.Name, out JToken token)) continue;
                         try { field.SetValue(_configObj, token.ToObject(field.FieldType)); }
                         catch { /* ignore type mismatches — keep default */ }
                     }
@@ -274,8 +282,27 @@ namespace VaroniaBackOffice
                 _configObj = Activator.CreateInstance(configType);
             }
 
+            NotifyAddonsLoad();
             LoadExtraFields();
             _isDirty = false;
+        }
+
+        private void NotifyAddonsLoad()
+        {
+            foreach (var addon in GameConfigAddons.Registered)
+            {
+                try
+                {
+                    addon.OnLoad(_loadedJson);
+                    if (addon.ClaimedKeys != null)
+                        foreach (var key in addon.ClaimedKeys)
+                            if (!string.IsNullOrEmpty(key)) _claimedKeys.Add(key);
+                }
+                catch (Exception e)
+                {
+                    Debug.LogError($"[GameConfig Editor] Addon OnLoad error: {e}");
+                }
+            }
         }
 
         private void LoadExtraFields()
@@ -289,7 +316,7 @@ namespace VaroniaBackOffice
                 if (_knownFields != null)
                     foreach (var f in _knownFields) known.Add(f.Name);
                 foreach (var prop in jObj.Properties())
-                    if (!known.Contains(prop.Name))
+                    if (!known.Contains(prop.Name) && !_claimedKeys.Contains(prop.Name))
                         _extraFields[prop.Name] = prop.Value;
             }
             catch (Exception e)
@@ -384,6 +411,18 @@ namespace VaroniaBackOffice
                 EditorGUILayout.Space(8);
             }
 
+            // ── Addon sections ──
+            if (GameConfigAddons.Registered.Count > 0)
+            {
+                var ctx = new AddonContext(this);
+                foreach (var addon in GameConfigAddons.Registered)
+                {
+                    try { addon.OnDraw(ctx); }
+                    catch (Exception e) { Debug.LogError($"[GameConfig Editor] Addon OnDraw error: {e}"); }
+                    EditorGUILayout.Space(8);
+                }
+            }
+
             // ── Add field card ──
             DrawCard(() =>
             {
@@ -418,7 +457,7 @@ namespace VaroniaBackOffice
             object newValue;
 
             EditorGUILayout.BeginHorizontal();
-            GUILayout.Label(field.Name, fieldLabelStyle, GUILayout.Width(150));
+            GUILayout.Label(new GUIContent(field.Name, GetTooltip(field)), fieldLabelStyle, GUILayout.Width(150));
 
             if (type == typeof(string))
                 newValue = EditorGUILayout.TextField((string)value ?? "");
@@ -609,6 +648,12 @@ namespace VaroniaBackOffice
             foreach (var kvp in _extraFields)
                 jObj[kvp.Key] = kvp.Value;
 
+            foreach (var addon in GameConfigAddons.Registered)
+            {
+                try { addon.OnSave(jObj); }
+                catch (Exception e) { Debug.LogError($"[GameConfig Editor] Addon OnSave error: {e}"); }
+            }
+
             string dir = Path.GetDirectoryName(_savePath);
             if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
                 Directory.CreateDirectory(dir);
@@ -619,6 +664,12 @@ namespace VaroniaBackOffice
         }
 
         // ─── Helpers ──────────────────────────────────────────────────────────────
+
+        private static string GetTooltip(FieldInfo field)
+        {
+            var t = field.GetCustomAttribute<TooltipAttribute>();
+            return t != null ? t.tooltip : null;
+        }
 
         private static JToken BuildToken(string raw, string typeLabel)
         {
@@ -665,6 +716,40 @@ namespace VaroniaBackOffice
             r.x    += 20;
             r.width -= 40;
             EditorGUI.DrawRect(r, colDivider);
+        }
+
+        // ─── Addon support ──────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Handed to addons during <see cref="IGameConfigAddon.OnDraw"/>. Gives access to the
+        /// window's themed drawing helpers, shared palette/styles and dirty flag — without
+        /// exposing the window's internals to other assemblies. Nested so it can reach the
+        /// enclosing window's private members directly.
+        /// </summary>
+        public sealed class AddonContext
+        {
+            private readonly GameConfigReflectionEditor _w;
+            internal AddonContext(GameConfigReflectionEditor w) { _w = w; }
+
+            /// <summary>The parsed config JSON loaded from disk (null if no file yet).</summary>
+            public JObject Json => _w._loadedJson;
+
+            public void SetDirty()                          => _w._isDirty = true;
+            public void Card(Action content, Color accent)  => _w.DrawCard(content, accent);
+            public void SectionLabel(string text)           => _w.DrawSectionLabel(text);
+            public void Divider()                           => _w.DrawDivider();
+
+            // Shared palette
+            public Color Accent     => colAccent;
+            public Color Warn       => colWarn;
+            public Color Error      => colError;
+            public Color TextMuted  => colTextMuted;
+            public Color TextSecond => colTextSecond;
+
+            // Shared styles (lazily built)
+            public GUIStyle FieldLabelStyle { get { _w.BuildStyles(); return fieldLabelStyle; } }
+            public GUIStyle BadgeStyle      { get { _w.BuildStyles(); return badgeStyle; } }
+            public GUIStyle ReadOnlyStyle   { get { _w.BuildStyles(); return readOnlyStyle; } }
         }
     }
 }

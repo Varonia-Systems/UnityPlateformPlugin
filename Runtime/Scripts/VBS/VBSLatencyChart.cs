@@ -42,6 +42,7 @@ public class VBSLatencyChart : MonoBehaviour
     private CVRSystem _vrSystem;
     private string _headsetName = "—";
     private bool _ready = false;
+    private bool show   = false; // piloté par OnMovieChanged : masqué en spectateur ou si HideMode != 0
 
     private int _lagCount = 0;
     private float _totalLagTime = 0f;
@@ -101,7 +102,11 @@ public class VBSLatencyChart : MonoBehaviour
     static void KillAll()
     {
         _dead = true;
+#if UNITY_2022_2_OR_NEWER
+        foreach (var chart in FindObjectsByType<VBSLatencyChart>(FindObjectsSortMode.None))
+#else
         foreach (var chart in FindObjectsOfType<VBSLatencyChart>())
+#endif
         {
             chart._vrSystem = null;
             chart._ready = false;
@@ -127,6 +132,7 @@ public class VBSLatencyChart : MonoBehaviour
 
         EnsureRT();
         _ready = true;
+        OnMovieChanged(); // état initial de `show` (spectateur / HideMode) au cas où l'event a déjà été émis
         StartCoroutine(DataLoop());
     }
 
@@ -353,7 +359,7 @@ public class VBSLatencyChart : MonoBehaviour
 
     private void OnGUI()
     {
-        if (!_ready || _dead) return;
+        if (!_ready || _dead || !show) return;
         EnsureStyles();
         EnsureRT();
 
@@ -410,10 +416,27 @@ public class VBSLatencyChart : MonoBehaviour
         _statValStyle = new GUIStyle { fontSize = Mathf.RoundToInt(9 * scale), fontStyle = FontStyle.Bold, normal = { textColor = ColOrange } };
     }
 
+    void OnEnable()
+    {
+        BackOfficeVaronia.OnMovieChanged += OnMovieChanged;
+    }
+
     void OnDisable()
     {
+        BackOfficeVaronia.OnMovieChanged -= OnMovieChanged;
         _vrSystem = null;
         _ready = false;
+    }
+
+    private void OnMovieChanged()
+    {
+        if (BackOfficeVaronia.Instance != null)
+        {
+            var mode = BackOfficeVaronia.Instance.config.DeviceMode;
+            bool isSpectator = mode == DeviceMode.Server_Spectator || mode == DeviceMode.Client_Spectator;
+            // Pas de chart en mode spectateur.
+            show = !isSpectator && BackOfficeVaronia.Instance.config.HideMode == 0;
+        }
     }
 
     private void OnDestroy()

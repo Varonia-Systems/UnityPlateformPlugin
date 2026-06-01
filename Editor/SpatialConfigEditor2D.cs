@@ -57,6 +57,13 @@ namespace VaroniaBackOffice
         private float _rectW    = 7f;    // meters along X
         private float _rectH    = 5.5f;  // meters along Z
 
+        // Ghost points: snapshot of the LAST SAVED boundary positions (LOCAL XZ).
+        // While there are unsaved edits, any point that has moved since the
+        // snapshot is drawn as a faint "ghost" at its saved position, with a
+        // dotted line to its current position. Captured on load & on save.
+        private bool _showGhosts = true;
+        private List<List<Vector2>> _ghostPoints;
+
         // Undo
         private readonly Stack<string> _undoStack = new Stack<string>(64);
         private const int UndoMaxDepth = 64;
@@ -160,6 +167,11 @@ namespace VaroniaBackOffice
             GUILayout.Label("m", EditorStyles.miniLabel, GUILayout.Width(14));
             GUI.enabled = true;
 
+            GUILayout.Space(12);
+
+            // ── Saved-state underlay ──
+            _showGhosts = GUILayout.Toggle(_showGhosts, " Saved", EditorStyles.toolbarButton, GUILayout.Width(62));
+
             GUILayout.FlexibleSpace();
 
             // ── View controls ──
@@ -188,6 +200,7 @@ namespace VaroniaBackOffice
                 if (_showGrid) DrawGrid(rect);
                 if (_showRect) DrawReferenceRect(rect);
                 DrawAxes(rect);
+                DrawGhostPoints(rect);          // under live points, so live stays prominent
                 DrawBoundariesAndPoints(rect);
                 DrawSyncPos(rect);
                 DrawHud(rect);
@@ -424,6 +437,80 @@ namespace VaroniaBackOffice
                         Handles.DrawWireDisc(sp, Vector3.forward, radius - 1f); // 2nd ring for visual weight
                         Handles.DrawSolidDisc(sp, Vector3.forward, selO ? 5f : 3.5f);
                     }
+                }
+            }
+            Handles.EndGUI();
+        }
+
+        // ─── Ghost points (last-saved positions of moved vertices) ─────────────────
+
+        /// <summary>
+        /// Capture the current boundary points as the "ghost" reference, in LOCAL
+        /// XZ. Call right after the in-memory state matches disk (i.e. just after
+        /// load and just after save). Cheap: only runs on those two events.
+        /// </summary>
+        private void CaptureGhostSnapshot()
+        {
+            _ghostPoints = null;
+            var spatial = _configObj as Spatial;
+            if (spatial?.Boundaries == null) return;
+
+            _ghostPoints = new List<List<Vector2>>(spatial.Boundaries.Count);
+            foreach (var b in spatial.Boundaries)
+            {
+                var list = new List<Vector2>();
+                if (b?.Points != null)
+                    foreach (var p in b.Points)
+                        list.Add(p != null ? new Vector2(p.x, p.z) : Vector2.zero);
+                _ghostPoints.Add(list);
+            }
+        }
+
+        /// <summary>
+        /// Draws the LAST SAVED boundaries a second time, faint, UNDERNEATH the live
+        /// ones (this method is called before DrawBoundariesAndPoints). While there
+        /// are unsaved edits, the saved outline shows through wherever the live one
+        /// has been moved away from it. Self-contained: uses only the saved snapshot
+        /// (no index mapping against the live data), so it works through inserts and
+        /// deletes too. Hidden via the "Saved" toolbar toggle.
+        /// </summary>
+        private void DrawGhostPoints(Rect rect)
+        {
+            if (!_showGhosts || !_isDirty || _ghostPoints == null) return;
+            var spatial = _configObj as Spatial;
+            if (spatial?.Boundaries == null) return;
+
+            Handles.BeginGUI();
+            for (int bi = 0; bi < _ghostPoints.Count; bi++)
+            {
+                var saved = _ghostPoints[bi];
+                if (saved == null || saved.Count < 2) continue;
+
+                // Same colour as the live boundary, just much less opaque.
+                Color baseCol = Color.white;
+                if (bi < spatial.Boundaries.Count)
+                {
+                    var bc = spatial.Boundaries[bi]?.BoundaryColor;
+                    if (bc != null) baseCol = new Color(bc.x, bc.y, bc.z);
+                }
+
+                // ── Faint outline (every edge between consecutive saved points) ──
+                Handles.color = new Color(baseCol.r, baseCol.g, baseCol.b, 0.30f);
+                for (int i = 0; i < saved.Count; i++)
+                {
+                    Vector2 a = WorldToScreen(LocalToWorld2D(saved[i]));
+                    Vector2 c = WorldToScreen(LocalToWorld2D(saved[(i + 1) % saved.Count]));
+                    if (ClipSegmentToRect(a, c, rect, out var ca, out var cb))
+                        Handles.DrawAAPolyLine(2.5f, ca, cb);
+                }
+
+                // ── Faint vertices ──
+                Handles.color = new Color(baseCol.r, baseCol.g, baseCol.b, 0.35f);
+                for (int i = 0; i < saved.Count; i++)
+                {
+                    Vector2 sp = WorldToScreen(LocalToWorld2D(saved[i]));
+                    if (RectContainsWithMargin(rect, sp, 8f))
+                        Handles.DrawSolidDisc(sp, Vector3.forward, 4f);
                 }
             }
             Handles.EndGUI();

@@ -65,6 +65,20 @@ public class DebugSceneMenu : MonoBehaviour
     private List<string> _sceneNames  = new List<string>();
     private int          _currentPage = 0;
 
+    // ─── Game trigger (hold-to-arm + self-timer) ───────────────────────────────
+    // F2/F3 : maintenir 2 s → arme un retardateur de 5 s → lance la partie.
+    // Relâcher pendant l'armement annule ; ré-appuyer pendant le décompte annule.
+
+    private const float ArmHoldDuration  = 2f;    // durée de maintien pour armer le mode différé
+    private const float CountdownDuration = 5f;    // décompte avant lancement
+    private const float ArmShowDelay     = 0.35f;  // au-delà : on affiche l'overlay (un tap rapide ne clignote pas)
+
+    private enum TriggerPhase { Idle, Arming, Countdown }
+    private TriggerPhase _triggerPhase    = TriggerPhase.Idle;
+    private bool         _pendingIsF3     = false; // true = F3 (W/ TUTO), false = F2 (NO TUTO)
+    private float        _holdTimer       = 0f;    // monte vers ArmHoldDuration
+    private float        _countdownTimer  = 0f;    // descend depuis CountdownDuration
+
     // ─── Styles ───────────────────────────────────────────────────────────────
 
     private bool      _stylesBuilt;
@@ -78,10 +92,15 @@ public class DebugSceneMenu : MonoBehaviour
     private GUIStyle  _footerStyle;
     private GUIStyle  _f2Style;
     private GUIStyle  _f3Style;
+    private GUIStyle  _overlayBigStyle;
+    private GUIStyle  _overlayTitleStyle;
+    private GUIStyle  _overlaySubStyle;
+    private Texture2D _whiteTex; // texture neutre teintée via GUI.color (dim + barres)
     private Texture2D _bgTex;
     private Texture2D _accentTex;
     private Texture2D _activePillTex;
     private Texture2D _divTex;
+    private Texture2D _rowHoverTex; // highlight au survol d'une ligne cliquable
 
     // ─────────────────────────────────────────────────────────────────────────
 
@@ -105,23 +124,113 @@ public class DebugSceneMenu : MonoBehaviour
 #else
         if (Input.GetKeyDown(KeyCode.F1)) _menuVisible = !_menuVisible;
 #endif
+        // Le retardateur tourne en continu : une fois armé, le décompte se poursuit
+        // même si le menu est refermé. Seul le *démarrage* (Idle→Arming) exige le menu.
+        UpdateGameTrigger();
+
         if (!_menuVisible) return;
 
         HandlePagination();
         HandleSelection();
-        HandleSpecialTriggers();
     }
 
-    private void HandleSpecialTriggers()
+    private void UpdateGameTrigger()
+    {
+        float dt = Time.unscaledDeltaTime;
+
+        switch (_triggerPhase)
+        {
+            case TriggerPhase.Idle:
+                // F2/F3 fonctionnent en permanence (indépendamment du menu F1).
+                if      (F2Pressed()) { _triggerPhase = TriggerPhase.Arming; _pendingIsF3 = false; _holdTimer = 0f; }
+                else if (F3Pressed()) { _triggerPhase = TriggerPhase.Arming; _pendingIsF3 = true;  _holdTimer = 0f; }
+                break;
+
+            case TriggerPhase.Arming:
+                // Le déclenchement se fait UNIQUEMENT au relâchement (key up).
+                // Tant que la touche est tenue, on ne fait qu'accumuler le temps de maintien.
+                bool stillHeld = _pendingIsF3 ? IsF3Held() : IsF2Held();
+                if (stillHeld)
+                {
+                    _holdTimer += dt;
+                    break;
+                }
+
+                // ── Key up : seul moment où l'action est déclenchée ──
+                if (_holdTimer < ArmHoldDuration)
+                {
+                    // Appui court → départ immédiat (classique).
+                    _triggerPhase = TriggerPhase.Idle;
+                    BackOfficeVaronia.Instance.TriggerStartGame(_pendingIsF3);
+                }
+                else
+                {
+                    // Maintenu ≥ 2 s → mode différé : on lance le décompte et on ferme le menu F1.
+                    _triggerPhase   = TriggerPhase.Countdown;
+                    _countdownTimer = CountdownDuration;
+                    _menuVisible    = false;
+                }
+                break;
+
+            case TriggerPhase.Countdown:
+                // Retardateur : tourne tout seul. Un nouvel appui F2/F3 annule.
+                if (F2OrF3Pressed()) { _triggerPhase = TriggerPhase.Idle; break; }
+
+                _countdownTimer -= dt;
+                if (_countdownTimer <= 0f)
+                {
+                    _triggerPhase = TriggerPhase.Idle;
+                    BackOfficeVaronia.Instance.TriggerStartGame(_pendingIsF3);
+                }
+                break;
+        }
+    }
+
+    // ─── Input helpers (F2/F3) ──────────────────────────────────────────────────
+
+    private static bool IsF2Held()
     {
 #if ENABLE_INPUT_SYSTEM
-        if (Keyboard.current == null) return;
-        // The logic for F2/F3 is kept here as requested previously
-        if (Keyboard.current.f2Key.wasPressedThisFrame) BackOfficeVaronia.Instance.TriggerStartGame(false);
-        if (Keyboard.current.f3Key.wasPressedThisFrame) BackOfficeVaronia.Instance.TriggerStartGame(true);
+        return Keyboard.current != null && Keyboard.current.f2Key.isPressed;
 #else
-        if (Input.GetKeyDown(KeyCode.F2)) BackOfficeVaronia.Instance.TriggerStartGame(false);
-        if (Input.GetKeyDown(KeyCode.F3)) BackOfficeVaronia.Instance.TriggerStartGame(true);
+        return Input.GetKey(KeyCode.F2);
+#endif
+    }
+
+    private static bool IsF3Held()
+    {
+#if ENABLE_INPUT_SYSTEM
+        return Keyboard.current != null && Keyboard.current.f3Key.isPressed;
+#else
+        return Input.GetKey(KeyCode.F3);
+#endif
+    }
+
+    private static bool F2Pressed()
+    {
+#if ENABLE_INPUT_SYSTEM
+        return Keyboard.current != null && Keyboard.current.f2Key.wasPressedThisFrame;
+#else
+        return Input.GetKeyDown(KeyCode.F2);
+#endif
+    }
+
+    private static bool F3Pressed()
+    {
+#if ENABLE_INPUT_SYSTEM
+        return Keyboard.current != null && Keyboard.current.f3Key.wasPressedThisFrame;
+#else
+        return Input.GetKeyDown(KeyCode.F3);
+#endif
+    }
+
+    private static bool F2OrF3Pressed()
+    {
+#if ENABLE_INPUT_SYSTEM
+        if (Keyboard.current == null) return false;
+        return Keyboard.current.f2Key.wasPressedThisFrame || Keyboard.current.f3Key.wasPressedThisFrame;
+#else
+        return Input.GetKeyDown(KeyCode.F2) || Input.GetKeyDown(KeyCode.F3);
 #endif
     }
 
@@ -172,11 +281,27 @@ public class DebugSceneMenu : MonoBehaviour
 
     private void OnGUI()
     {
-        if (!_menuVisible) return;
-        
         float scale = (Screen.height / 1080f) * scaleFactor;
-        EnsureStyles(scale);
 
+        if (_menuVisible)
+        {
+            EnsureStyles(scale);
+            DrawMenu(scale);
+        }
+
+        // Overlay du mode différé, dessiné EN DERNIER → passe au-dessus du menu F1.
+        // Un tap rapide (< ArmShowDelay) n'affiche rien.
+        bool showOverlay = _triggerPhase == TriggerPhase.Countdown
+                        || (_triggerPhase == TriggerPhase.Arming && _holdTimer >= ArmShowDelay);
+        if (showOverlay)
+        {
+            EnsureStyles(scale);
+            DrawTriggerOverlay(scale);
+        }
+    }
+
+    private void DrawMenu(float scale)
+    {
         int   startIdx        = _currentPage * scenesPerPage;
         int   scenesInThisPage = Mathf.Min(scenesPerPage, _sceneNames.Count - startIdx);
         int   totalPages      = Mathf.Max(1, Mathf.CeilToInt((float)_sceneNames.Count / scenesPerPage));
@@ -214,6 +339,14 @@ public class DebugSceneMenu : MonoBehaviour
         {
             int  sceneIdx = startIdx + i;
             bool isCurrent = (sceneIdx == SceneManager.GetActiveScene().buildIndex);
+
+            // Hit area sur toute la ligne — clic = même action que la touche numérique.
+            Rect rowRect = new Rect(panel.x + 8f * scale, y, sWidth - 16f * scale, rowH);
+
+            // Highlight au hover (visuel uniquement)
+            if (rowRect.Contains(Event.current.mousePosition))
+                GUI.DrawTexture(rowRect, _rowHoverTex);
+
             GUI.Label(new Rect(lx, y, lw, rowH), _sceneNames[sceneIdx].ToUpper(), _labelStyle);
 
             Rect badgeRect = new Rect(panel.x + sWidth - 65f * scale, y + 2f * scale, 50f * scale, rowH - 6f * scale);
@@ -229,6 +362,12 @@ public class DebugSceneMenu : MonoBehaviour
                 _pillStyle.normal.textColor  = ColMuted;
                 GUI.Label(badgeRect, $"[{(i + 1) % 10}]", _pillStyle);
             }
+
+            // Bouton invisible posé par-dessus toute la ligne — déclenche le load au clic.
+            // GUIStyle.none = pas de rendu, mais GUI.Button capte bien l'événement.
+            if (GUI.Button(rowRect, GUIContent.none, GUIStyle.none))
+                ExecuteAction(sceneIdx);
+
             y += rowH;
         }
 
@@ -271,6 +410,83 @@ public class DebugSceneMenu : MonoBehaviour
         }
     }
 
+    // ─── Overlay retardateur ────────────────────────────────────────────────────
+
+    private void DrawTriggerOverlay(float scale)
+    {
+        float sw = Screen.width, sh = Screen.height;
+        bool  counting = _triggerPhase == TriggerPhase.Countdown;
+
+        Color modeCol = _pendingIsF3 ? ColBad : ColAccent;
+        string modeTxt = _pendingIsF3 ? "START (W/ TUTO)" : "START (NO TUTO)";
+
+        // Léger assombrissement de l'écran pendant le décompte.
+        if (counting)
+        {
+            GUI.color = new Color(0f, 0f, 0f, 0.35f);
+            GUI.DrawTexture(new Rect(0, 0, sw, sh), _whiteTex);
+            GUI.color = Color.white;
+        }
+
+        // Carte centrée.
+        float cw = 340f * scale, ch = 168f * scale;
+        Rect card = new Rect((sw - cw) * 0.5f, (sh - ch) * 0.5f, cw, ch);
+        GUI.DrawTexture(card, _bgTex);
+        GUI.color = modeCol;
+        GUI.DrawTexture(new Rect(card.x, card.y, 3f * scale, card.height), _whiteTex);
+        GUI.color = Color.white;
+
+        float pad = 16f * scale;
+        float ix  = card.x + pad;
+        float iw  = cw - pad * 2f;
+        float iy  = card.y + pad;
+
+        // Titre + mode.
+        bool armed = !counting && _holdTimer >= ArmHoldDuration;
+
+        _overlayTitleStyle.normal.textColor = modeCol;
+        GUI.Label(new Rect(ix, iy, iw, 18f * scale),
+                  counting ? "DÉMARRAGE DANS…"
+                           : (armed ? "PRÊT — RELÂCHEZ POUR DIFFÉRER" : "MAINTENIR POUR DIFFÉRER"),
+                  _overlayTitleStyle);
+        GUI.Label(new Rect(ix, iy + 16f * scale, iw, 16f * scale), modeTxt, _overlaySubStyle);
+
+        // Zone centrale.
+        float midY = iy + 36f * scale;
+        float midH = 66f * scale;
+        float fill;
+        if (counting)
+        {
+            int secs = Mathf.CeilToInt(_countdownTimer);
+            _overlayBigStyle.normal.textColor = modeCol;
+            GUI.Label(new Rect(ix, midY, iw, midH), secs.ToString(), _overlayBigStyle);
+            fill = Mathf.Clamp01(_countdownTimer / CountdownDuration); // se vide
+        }
+        else
+        {
+            _overlayBigStyle.normal.textColor = modeCol;
+            GUI.Label(new Rect(ix, midY, iw, midH), "●", _overlayBigStyle);
+            fill = Mathf.Clamp01(_holdTimer / ArmHoldDuration); // se remplit
+        }
+
+        // Barre de progression.
+        float barY = card.y + ch - pad - 18f * scale;
+        float barH = 6f * scale;
+        Rect barTrack = new Rect(ix, barY, iw, barH);
+        GUI.color = new Color(1f, 1f, 1f, 0.10f);
+        GUI.DrawTexture(barTrack, _whiteTex);
+        GUI.color = modeCol;
+        GUI.DrawTexture(new Rect(ix, barY, iw * fill, barH), _whiteTex);
+        GUI.color = Color.white;
+
+        // Aide.
+        GUI.Label(new Rect(ix, barY + barH + 4f * scale, iw, 14f * scale),
+                  counting ? "Appuyez à nouveau pour annuler"
+                           : (armed ? "Relâchez pour lancer le compte à rebours (5 s)"
+                                    : "Maintenez 2 s pour différer • relâchez = départ immédiat"),
+                  _overlaySubStyle);
+    }
+
     private bool IsNumericDown(int digit)
     {
 #if ENABLE_INPUT_SYSTEM
@@ -299,10 +515,12 @@ public class DebugSceneMenu : MonoBehaviour
         _stylesBuilt = true;
         _lastScale   = scale;
 
+        if (_whiteTex == null)      _whiteTex      = MakeTex(Color.white);
         if (_bgTex == null)         _bgTex         = MakeTex(ColBg);
         if (_accentTex == null)     _accentTex     = MakeTex(ColAccent);
         if (_activePillTex == null) _activePillTex = MakeTex(new Color(ColGood.r, ColGood.g, ColGood.b, 0.15f));
         if (_divTex == null)        _divTex        = MakeTex(ColDiv);
+        if (_rowHoverTex == null)   _rowHoverTex   = MakeTex(new Color(ColAccent.r, ColAccent.g, ColAccent.b, 0.10f));
 
         _titleStyle   = new GUIStyle { fontSize = Mathf.RoundToInt(11 * scale), fontStyle = FontStyle.Bold, normal = { textColor = ColAccent } };
         _sectionStyle = new GUIStyle { fontSize = Mathf.RoundToInt(9 * scale),  fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleLeft, normal = { textColor = ColAccent } };
@@ -313,6 +531,10 @@ public class DebugSceneMenu : MonoBehaviour
         _footerStyle  = new GUIStyle(_labelStyle) { fontSize = Mathf.RoundToInt(9 * scale), alignment = TextAnchor.MiddleCenter, normal = { textColor = ColMuted } };
         _f2Style      = new GUIStyle(_footerStyle) { fontSize = Mathf.RoundToInt(11 * scale), fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleLeft,  normal = { textColor = ColAccent } };
         _f3Style      = new GUIStyle(_footerStyle) { fontSize = Mathf.RoundToInt(11 * scale), fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleRight, normal = { textColor = ColBad } };
+
+        _overlayBigStyle   = new GUIStyle { fontSize = Mathf.RoundToInt(64 * scale), fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter, normal = { textColor = ColValue } };
+        _overlayTitleStyle = new GUIStyle { fontSize = Mathf.RoundToInt(12 * scale), fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter, normal = { textColor = ColAccent } };
+        _overlaySubStyle   = new GUIStyle { fontSize = Mathf.RoundToInt(10 * scale), fontStyle = FontStyle.Normal, alignment = TextAnchor.MiddleCenter, normal = { textColor = ColMuted } };
     }
 
     private static Texture2D MakeTex(Color col)
@@ -325,9 +547,11 @@ public class DebugSceneMenu : MonoBehaviour
 
     private void CleanTextures()
     {
+        if (_whiteTex)      Destroy(_whiteTex);
         if (_bgTex)         Destroy(_bgTex);
         if (_accentTex)     Destroy(_accentTex);
         if (_activePillTex) Destroy(_activePillTex);
         if (_divTex)        Destroy(_divTex);
+        if (_rowHoverTex)   Destroy(_rowHoverTex);
     }
 }

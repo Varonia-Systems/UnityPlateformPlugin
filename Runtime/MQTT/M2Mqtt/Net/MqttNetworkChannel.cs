@@ -443,7 +443,9 @@ namespace uPLibrary.Networking.M2Mqtt
                 case MqttSslProtocols.None:
                     return SslProtocols.None;
                 case MqttSslProtocols.SSLv3:
+#pragma warning disable 0618 // Ssl3 obsolete (code tiers M2Mqtt) — comportement inchange
                     return SslProtocols.Ssl3;
+#pragma warning restore 0618
                 case MqttSslProtocols.TLSv1_0:
                     return SslProtocols.Tls;
                 case MqttSslProtocols.TLSv1_1:
@@ -460,7 +462,9 @@ namespace uPLibrary.Networking.M2Mqtt
                 case MqttSslProtocols.None:
                     return SslProtocols.None;
                 case MqttSslProtocols.SSLv3:
+#pragma warning disable 0618 // Ssl3 obsolete (code tiers M2Mqtt) — comportement inchange
                     return SslProtocols.Ssl3;
+#pragma warning restore 0618
                 case MqttSslProtocols.TLSv1_0:
                     return SslProtocols.Tls;
                 case MqttSslProtocols.TLSv1_1:

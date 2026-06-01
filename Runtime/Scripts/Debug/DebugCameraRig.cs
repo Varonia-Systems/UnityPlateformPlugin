@@ -63,7 +63,11 @@ namespace VaroniaBackOffice
         {
             if (rig == null)
             {
+#if UNITY_2022_2_OR_NEWER
+                var sync = FindFirstObjectByType<VaroniaSync>();
+#else
                 var sync = FindObjectOfType<VaroniaSync>();
+#endif
                 if (sync != null) rig = sync.transform;
             }
             if (cam == null)

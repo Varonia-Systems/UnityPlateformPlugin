@@ -314,10 +314,15 @@ namespace VaroniaBackOffice
             bool fileExists = _savePath != null && File.Exists(_savePath);
             Color pillCol   = _isDirty ? colWarn : (fileExists ? colAccent : colTextMuted);
             string pillText = _isDirty ? "  UNSAVED  " : (fileExists ? "  SYNCED  " : "  NO FILE  ");
+            string pillTip  = _isDirty
+                ? "You have unsaved changes. Click SAVE to write them to GlobalConfig.json."
+                : (fileExists
+                    ? "All changes are saved to disk. The file on disk matches the in-memory config."
+                    : "No GlobalConfig.json found yet — saving will create one at the path shown below.");
             var pillStyle   = new GUIStyle(tagStyle);
             pillStyle.normal.textColor  = pillCol;
             pillStyle.normal.background = MakeRoundedTex(32, 32, new Color(pillCol.r, pillCol.g, pillCol.b, 0.15f), 6);
-            GUILayout.Label(pillText, pillStyle);
+            GUILayout.Label(new GUIContent(pillText, pillTip), pillStyle);
 
             GUILayout.Space(16);
             EditorGUILayout.EndHorizontal();
@@ -402,9 +407,43 @@ namespace VaroniaBackOffice
         // Nom des champs considérés comme "legacy" — affichés tout en bas avec un séparateur.
         private static readonly HashSet<string> LegacyFieldNames = new HashSet<string>
         {
+            "ForceLegacyController",
             "Controller",
             "WeaponMAC",
         };
+
+        // ─── Tooltips ─────────────────────────────────────────────────────────────
+        // Centralisé ici pour pouvoir documenter chaque champ d'un coup d'œil.
+        // La clé est le nom du field (reflection) → texte affiché au hover du label.
+        private static readonly Dictionary<string, string> FieldTooltips = new Dictionary<string, string>
+        {
+            // Network
+            { "ServerIP",      "IP address of the main game server. Use 'localhost' for local testing." },
+            { "MQTT_ServerIP", "IP address of the MQTT broker used for cross-process messaging." },
+            { "MQTT_IDClient", "Unique numeric ID used by this client when connecting to the MQTT broker. Must be different per machine on the same broker." },
+
+            // Preferences
+            { "DeviceMode", "Role of this device in the session: Server+Player, Client+Player, Spectator, etc." },
+            { "Language",   "UI and localized content language (e.g. 'Fr', 'En')." },
+            { "MainHand",   "Player's dominant hand. Drives weapon hold side and input bindings." },
+            { "PlayerName", "Display name used in lobbies, scoreboards and chat." },
+            { "HideMode",   "Internal display mode flag. Leave at 0 unless instructed." },
+            { "Direct",     "Optional fast-path used after a crash or resync — skips some steps (depending on the game) to rejoin faster." },
+
+            // Devices (multi-arme)
+            { "Devices", "Per-weapon binding list. Index in this list = weaponIndex used by VaroniaInput / VaroniaWeaponTracking. Leave empty to fall back to the legacy single-weapon system below." },
+
+            // Legacy
+            { "ForceLegacyController", "If checked, forces the legacy single-weapon system: the Devices list above is ignored (even if filled) and Controller + WeaponMAC (weapon 0) are always used." },
+            { "Controller", "Legacy: controller / weapon model for weapon 0. Ignored if Devices list above is non-empty." },
+            { "WeaponMAC",  "Legacy: MAC address / serial of weapon 0. Ignored if Devices list above is non-empty." },
+
+            // VR
+            { "HeadsetName", "Manual override for detected VR headset name (e.g. 'Pico 4 Ultra', 'Vive Focus 3'). Leave empty to auto-detect via OpenVR / OpenXR. Drives debug latency chart selection." },
+        };
+
+        private static string GetTooltip(string fieldName) =>
+            FieldTooltips.TryGetValue(fieldName, out var t) ? t : "";
 
         private void DrawKnownFields()
         {
@@ -428,7 +467,10 @@ namespace VaroniaBackOffice
             EditorGUILayout.BeginHorizontal();
             var legacyHeaderStyle = new GUIStyle(sectionStyle);
             legacyHeaderStyle.normal.textColor = colWarn;
-            GUILayout.Label("LEGACY  ·  SINGLE WEAPON  (use Devices instead)", legacyHeaderStyle);
+            GUILayout.Label(new GUIContent(
+                "LEGACY  ·  SINGLE WEAPON  (use Devices instead)",
+                "Old single-weapon fields, kept for backwards compatibility. Prefer the Devices list above for new projects."),
+                legacyHeaderStyle);
             GUILayout.FlexibleSpace();
             EditorGUILayout.EndHorizontal();
 
@@ -440,8 +482,8 @@ namespace VaroniaBackOffice
 
             EditorGUILayout.Space(4);
 
-            // 3. Champs legacy, dans un ordre explicite (Controller puis WeaponMAC)
-            foreach (var name in new[] { "Controller", "WeaponMAC" })
+            // 3. Champs legacy, dans un ordre explicite (toggle de forçage, puis Controller, puis WeaponMAC)
+            foreach (var name in new[] { "ForceLegacyController", "Controller", "WeaponMAC" })
             {
                 foreach (var field in _knownFields)
                 {
@@ -470,7 +512,7 @@ namespace VaroniaBackOffice
             object newValue;
 
             EditorGUILayout.BeginHorizontal();
-            GUILayout.Label(field.Name, fieldLabelStyle, GUILayout.Width(150));
+            GUILayout.Label(new GUIContent(field.Name, GetTooltip(field.Name)), fieldLabelStyle, GUILayout.Width(150));
 
             if (type == typeof(string))
                 newValue = EditorGUILayout.TextField((string)value ?? "");
@@ -534,25 +576,41 @@ namespace VaroniaBackOffice
             catch { /* settings absent : pas de check */ }
 
             EditorGUILayout.BeginHorizontal();
-            GUILayout.Label(field.Name, fieldLabelStyle, GUILayout.Width(150));
+            GUILayout.Label(new GUIContent(field.Name, GetTooltip(field.Name)), fieldLabelStyle, GUILayout.Width(150));
 
             string countLabel = $"  {list.Count} weapon{(list.Count > 1 ? "s" : "")}  ";
             var countStyle = new GUIStyle(badgeStyle);
-            GUILayout.Label(countLabel, countStyle);
+            GUILayout.Label(new GUIContent(countLabel, "Number of weapon bindings currently configured."), countStyle);
 
             if (expected > 0 && list.Count != expected && list.Count > 0)
             {
                 var warnStyle = new GUIStyle(badgeStyle);
                 warnStyle.normal.textColor  = colWarn;
                 warnStyle.normal.background = MakeRoundedTex(32, 32, colWarnDim, 4);
-                GUILayout.Label($"  ≠ RuntimeSettings ({expected})  ", warnStyle);
+                GUILayout.Label(new GUIContent(
+                    $"  ≠ RuntimeSettings ({expected})  ",
+                    "Mismatch: weapon count here doesn't match VaroniaRuntimeSettings.weaponCount. Sync them to avoid binding errors."), warnStyle);
             }
             else if (list.Count == 0)
             {
                 var fallbackStyle = new GUIStyle(badgeStyle);
                 fallbackStyle.normal.textColor  = colTextSecond;
                 fallbackStyle.normal.background = MakeRoundedTex(32, 32, new Color(0.4f, 0.4f, 0.4f, 0.15f), 4);
-                GUILayout.Label("  empty → legacy system  ", fallbackStyle);
+                GUILayout.Label(new GUIContent(
+                    "  empty → legacy system  ",
+                    "List is empty — the runtime will use the legacy Controller + WeaponMAC fields below for weapon 0."), fallbackStyle);
+            }
+
+            // Badge d'avertissement si le forçage legacy est actif : la liste est ignorée.
+            bool forceLegacy = (_configObj as GlobalConfig)?.ForceLegacyController ?? false;
+            if (forceLegacy)
+            {
+                var ignoredStyle = new GUIStyle(badgeStyle);
+                ignoredStyle.normal.textColor  = colWarn;
+                ignoredStyle.normal.background = MakeRoundedTex(32, 32, colWarnDim, 4);
+                GUILayout.Label(new GUIContent(
+                    "  IGNORED — ForceLegacyController ON  ",
+                    "ForceLegacyController is enabled below: this list is bypassed and the legacy Controller + WeaponMAC are used instead."), ignoredStyle);
             }
 
             GUILayout.FlexibleSpace();
@@ -570,10 +628,15 @@ namespace VaroniaBackOffice
                 };
                 EditorGUILayout.BeginHorizontal();
                 GUILayout.Label("",            colHeaderStyle, GUILayout.Width(30));
-                GUILayout.Label("Controller",   colHeaderStyle);
-                GUILayout.Label("Serial",       colHeaderStyle);
-                GUILayout.Label("Tracking ID",  colHeaderStyle);
-                GUILayout.Label("Force Steam",  colHeaderStyle, GUILayout.Width(70));
+                GUILayout.Label(new GUIContent("Controller",
+                    "Weapon model / controller type for this slot. The numeric value in parentheses is the controller ID used by VaroniaWeapon to spawn the right prefab."), colHeaderStyle);
+                GUILayout.Label(new GUIContent("Serial",
+                    "Unique hardware identifier (MAC address, etc.) used to match this slot to a physical device. Leave empty if not needed."), colHeaderStyle);
+                GUILayout.Label(new GUIContent("Tracking ID",
+                    "Optional tracker identifier (SteamVR serial like 'LHR-XXXXXXXX', OpenXR device id, etc.). Mutually exclusive with 'Force Steam'."), colHeaderStyle);
+                GUILayout.Label("", colHeaderStyle, GUILayout.Width(24)); // espace pour le "OR"
+                GUILayout.Label(new GUIContent("Force Steam",
+                    "SteamVR device index override. -1 = auto (disabled), >= 0 = force this slot to track the SteamVR device at that index. Mutually exclusive with 'Tracking ID'."), colHeaderStyle, GUILayout.Width(70));
                 GUILayout.Label("",            colHeaderStyle, GUILayout.Width(24));
                 EditorGUILayout.EndHorizontal();
             }
@@ -619,23 +682,50 @@ namespace VaroniaBackOffice
                     _isDirty = true;
                 }
 
-                // TrackingId textfield
+                // ── Exclusion mutuelle : TrackingId XOR ForceSteamId ──
+                // Si l'un est rempli, l'autre est grisé (disabled) avec un tooltip.
+                // Les deux peuvent rester vides/-1 (= aucun override).
+                bool hasTrackingId   = !string.IsNullOrEmpty(entry.TrackingId);
+                bool hasForceSteamId = entry.ForceSteamId >= 0;
+
+                // TrackingId textfield (disabled si ForceSteamId est set)
+                bool trackingIdDisabled = hasForceSteamId && !hasTrackingId;
+                GUI.enabled = !trackingIdDisabled;
                 EditorGUI.BeginChangeCheck();
-                string nextTrackingId = EditorGUILayout.TextField(entry.TrackingId ?? "");
-                if (EditorGUI.EndChangeCheck())
+                string trackingPlaceholder = trackingIdDisabled
+                    ? "(disabled — Force Steam set)"
+                    : (entry.TrackingId ?? "");
+                string nextTrackingId = EditorGUILayout.TextField(trackingPlaceholder);
+                if (EditorGUI.EndChangeCheck() && !trackingIdDisabled)
                 {
                     entry.TrackingId = nextTrackingId;
                     _isDirty = true;
                 }
+                GUI.enabled = true;
 
-                // ForceSteamId intfield (fixed width)
+                // Séparateur visuel "OR" entre les deux colonnes exclusives
+                var orStyle = new GUIStyle(badgeStyle)
+                {
+                    fontSize = 8,
+                    alignment = TextAnchor.MiddleCenter,
+                };
+                orStyle.normal.textColor  = colTextMuted;
+                orStyle.normal.background = MakeRoundedTex(32, 32, new Color(1f, 1f, 1f, 0.04f), 4);
+                GUILayout.Label(new GUIContent("OR",
+                    "Tracking ID and Force Steam are mutually exclusive — pick one, or leave both empty for auto."),
+                    orStyle, GUILayout.Width(24));
+
+                // ForceSteamId intfield (disabled si TrackingId est set)
+                bool forceSteamDisabled = hasTrackingId && !hasForceSteamId;
+                GUI.enabled = !forceSteamDisabled;
                 EditorGUI.BeginChangeCheck();
                 int nextForceSteamId = EditorGUILayout.IntField(entry.ForceSteamId, GUILayout.Width(70));
-                if (EditorGUI.EndChangeCheck())
+                if (EditorGUI.EndChangeCheck() && !forceSteamDisabled)
                 {
                     entry.ForceSteamId = nextForceSteamId;
                     _isDirty = true;
                 }
+                GUI.enabled = true;
 
                 // Remove button
                 var removeStyle = new GUIStyle(buttonStyle)
@@ -646,7 +736,8 @@ namespace VaroniaBackOffice
                 removeStyle.normal.background = MakeRoundedTex(32, 32, colErrorDim, 4);
                 removeStyle.normal.textColor  = colError;
                 removeStyle.hover.textColor   = Color.white;
-                if (GUILayout.Button("✕", removeStyle, GUILayout.Width(24), GUILayout.Height(20)))
+                if (GUILayout.Button(new GUIContent("✕", "Remove this weapon binding from the list."),
+                    removeStyle, GUILayout.Width(24), GUILayout.Height(20)))
                     toRemove = i;
 
                 EditorGUILayout.EndHorizontal();
@@ -674,7 +765,8 @@ namespace VaroniaBackOffice
             addStyle.hover.textColor   = Color.white;
             addStyle.active.background = texAccentSolid;
 
-            if (GUILayout.Button("+ ADD WEAPON", addStyle, GUILayout.Height(22)))
+            if (GUILayout.Button(new GUIContent("+ ADD WEAPON", "Append a new empty weapon binding to the list."),
+                addStyle, GUILayout.Height(22)))
             {
                 list.Add(new WeaponBinding());
                 _isDirty = true;
@@ -695,8 +787,10 @@ namespace VaroniaBackOffice
             foreach (var kvp in _extraFields)
             {
                 EditorGUILayout.BeginHorizontal();
-                GUILayout.Label($"[{kvp.Value.Type}]", badgeStyle, GUILayout.Width(60));
-                GUILayout.Label(kvp.Key, fieldLabelStyle, GUILayout.Width(110));
+                GUILayout.Label(new GUIContent($"[{kvp.Value.Type}]",
+                    "JSON token type — string, int, float or bool."), badgeStyle, GUILayout.Width(60));
+                GUILayout.Label(new GUIContent(kvp.Key,
+                    "Extra JSON key not present on the GlobalConfig class. Will be written back as-is on save."), fieldLabelStyle, GUILayout.Width(110));
 
                 JToken edited = DrawJTokenEditor(kvp.Value);
                 if (edited.ToString() != kvp.Value.ToString())
@@ -713,7 +807,8 @@ namespace VaroniaBackOffice
                 removeStyle.normal.background = MakeRoundedTex(32, 32, colErrorDim, 4);
                 removeStyle.normal.textColor  = colError;
                 removeStyle.hover.textColor   = Color.white;
-                if (GUILayout.Button("✕", removeStyle, GUILayout.Width(24), GUILayout.Height(22)))
+                if (GUILayout.Button(new GUIContent("✕", "Remove this extra field from the saved JSON."),
+                    removeStyle, GUILayout.Width(24), GUILayout.Height(22)))
                 {
                     toRemove.Add(kvp.Key);
                     _isDirty = true;
@@ -743,7 +838,9 @@ namespace VaroniaBackOffice
         private void DrawAddField()
         {
             EditorGUILayout.BeginHorizontal();
-            GUILayout.Label("Name", fieldLabelStyle, GUILayout.Width(45));
+            GUILayout.Label(new GUIContent("Name",
+                "JSON key for the new field. Must not collide with an existing known field or extra field."),
+                fieldLabelStyle, GUILayout.Width(45));
             _newKey     = EditorGUILayout.TextField(_newKey);
             _newTypeIdx = EditorGUILayout.Popup(_newTypeIdx, TypeLabels, GUILayout.Width(70));
             EditorGUILayout.EndHorizontal();
@@ -751,7 +848,8 @@ namespace VaroniaBackOffice
             EditorGUILayout.Space(4);
 
             EditorGUILayout.BeginHorizontal();
-            GUILayout.Label("Value", fieldLabelStyle, GUILayout.Width(45));
+            GUILayout.Label(new GUIContent("Value", "Initial value for the new field."),
+                fieldLabelStyle, GUILayout.Width(45));
             if (TypeLabels[_newTypeIdx] == "bool")
                 _newBoolValue = EditorGUILayout.Toggle(_newBoolValue);
             else
@@ -774,7 +872,9 @@ namespace VaroniaBackOffice
             }
 
             GUI.enabled = canAdd;
-            if (GUILayout.Button("+ ADD FIELD", addStyle, GUILayout.Height(30)))
+            if (GUILayout.Button(new GUIContent("+ ADD FIELD",
+                "Add the field to the in-memory extras. Click SAVE afterwards to persist it to disk."),
+                addStyle, GUILayout.Height(30)))
             {
                 string typeLabel = TypeLabels[_newTypeIdx];
                 _extraFields[_newKey] = typeLabel == "bool"
@@ -795,7 +895,9 @@ namespace VaroniaBackOffice
             EditorGUILayout.BeginHorizontal();
             GUILayout.Space(16);
 
-            if (GUILayout.Button("REFRESH", buttonStyle, GUILayout.Height(34), GUILayout.MinWidth(110)))
+            if (GUILayout.Button(new GUIContent("REFRESH",
+                "Reload GlobalConfig.json from disk. Discards any unsaved changes in this window."),
+                buttonStyle, GUILayout.Height(34), GUILayout.MinWidth(110)))
                 Refresh();
 
             GUILayout.FlexibleSpace();
@@ -808,7 +910,9 @@ namespace VaroniaBackOffice
             saveStyle.active.background = _isDirty ? texWarnSolid : texAccentSolid;
 
             string saveLabel = _isDirty ? "  SAVE  ●" : "  SAVE";
-            if (GUILayout.Button(saveLabel, saveStyle, GUILayout.Height(34), GUILayout.MinWidth(150)))
+            if (GUILayout.Button(new GUIContent(saveLabel,
+                "Write current values (known fields + extra fields) to GlobalConfig.json on disk."),
+                saveStyle, GUILayout.Height(34), GUILayout.MinWidth(150)))
                 SaveToJson();
 
             GUILayout.Space(16);
@@ -817,7 +921,8 @@ namespace VaroniaBackOffice
             EditorGUILayout.Space(4);
 
             var pathStyle = new GUIStyle(footerStyle) { wordWrap = true };
-            GUILayout.Label(_savePath ?? "—", pathStyle);
+            GUILayout.Label(new GUIContent(_savePath ?? "—",
+                "Absolute path of the JSON file being read/written."), pathStyle);
 
             EditorGUILayout.Space(2);
             GUILayout.Label("Varonia Back Office  ·  GlobalConfig", footerStyle);

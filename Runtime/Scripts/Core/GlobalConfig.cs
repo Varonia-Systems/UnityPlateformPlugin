@@ -90,6 +90,13 @@ namespace VaroniaBackOffice
         
         [Header("Controller (legacy mono-arme)")]
         /// <summary>
+        /// Force l'ancien système mono-arme. Si vrai, <see cref="GetWeaponBinding"/> ignore
+        /// la liste <see cref="Devices"/> (même si elle est remplie) et utilise toujours
+        /// <see cref="Controller"/> + <see cref="WeaponMAC"/> (arme 0).
+        /// </summary>
+        public bool ForceLegacyController = false;
+
+        /// <summary>
         /// Ancien système : type de contrôleur unique de l'arme 0.
         /// Conservé pour rétrocompat — préférer <see cref="Devices"/> pour les nouveaux projets.
         /// </summary>
@@ -113,13 +120,16 @@ namespace VaroniaBackOffice
 
         /// <summary>
         /// Résout l'arme à l'index donné.
-        /// - Si <see cref="Devices"/> contient une entrée à cet index → la renvoie.
+        /// - Si <see cref="ForceLegacyController"/> est vrai → on ignore <see cref="Devices"/>
+        ///   et on force l'ancien système (Controller + WeaponMAC, arme 0 uniquement).
+        /// - Sinon, si <see cref="Devices"/> contient une entrée à cet index → la renvoie.
         /// - Sinon, pour weaponIndex == 0, retombe sur l'ancien système (Controller + WeaponMAC).
         /// - Sinon, renvoie null.
         /// </summary>
         public WeaponBinding GetWeaponBinding(int weaponIndex)
         {
-            if (Devices != null && weaponIndex >= 0 && weaponIndex < Devices.Count)
+            // Forçage legacy : court-circuite la liste Devices même si elle est renseignée.
+            if (!ForceLegacyController && Devices != null && weaponIndex >= 0 && weaponIndex < Devices.Count)
                 return Devices[weaponIndex];
 
             if (weaponIndex == 0)

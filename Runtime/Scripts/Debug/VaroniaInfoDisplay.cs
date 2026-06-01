@@ -86,7 +86,11 @@ namespace VaroniaBackOffice
         {
             BackOfficeVaronia.OnMovieChanged -= OnMovieChanged;
 #if VBO_UITOOLKIT_OVERLAYS
-            if (_panelSettings != null) Destroy(_panelSettings);
+            if (_panelSettings != null)
+            {
+                if (_panelSettings.themeStyleSheet != null) Destroy(_panelSettings.themeStyleSheet);
+                Destroy(_panelSettings);
+            }
             if (_doc != null && _doc.gameObject != null) Destroy(_doc.gameObject);
 #endif
         }
@@ -202,6 +206,10 @@ namespace VaroniaBackOffice
             _panelSettings = ScriptableObject.CreateInstance<PanelSettings>();
             _panelSettings.scaleMode = PanelScaleMode.ConstantPixelSize;
             _panelSettings.sortingOrder = 100;
+            // UI Toolkit refuses to render and logs "No Theme Style Sheet set" when
+            // a PanelSettings has no theme. This overlay styles every element inline,
+            // so an empty runtime theme is enough to satisfy the renderer.
+            _panelSettings.themeStyleSheet = ScriptableObject.CreateInstance<ThemeStyleSheet>();
 
             var uiGo = new GameObject("[InfoDisplayUI]");
             uiGo.transform.SetParent(transform, false);

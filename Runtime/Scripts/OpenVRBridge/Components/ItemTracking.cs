@@ -147,7 +147,11 @@ namespace VaroniaBackOffice
                     _dead = true;
 
                     // Désactive TOUS les ItemTracking immédiatement
+#if UNITY_2022_2_OR_NEWER
+                    foreach (var tracker in FindObjectsByType<ItemTracking>(FindObjectsSortMode.None))
+#else
                     foreach (var tracker in FindObjectsOfType<ItemTracking>())
+#endif
                     {
 #if STEAMVR_ENABLED
                         tracker.vr = null;
