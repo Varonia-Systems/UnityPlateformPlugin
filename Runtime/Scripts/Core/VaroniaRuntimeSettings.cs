@@ -86,6 +86,13 @@ namespace VaroniaBackOffice
 #if STRIKER_LINK
         public HapticEffectAsset InitStrikerHaptic;
         public HapticLibraryAsset InitStrikerLibrary;
+
+        /// <summary>
+        /// Librairies haptiques supplémentaires chargées au démarrage du Striker,
+        /// en plus de <see cref="InitStrikerLibrary"/>. Chaque entrée est ajoutée
+        /// via StrikerHaptics.AddToLibrary (les doublons/null sont ignorés).
+        /// </summary>
+        public List<HapticLibraryAsset> InitStrikerLibraries = new List<HapticLibraryAsset>();
 #endif
 
         [Header("Debug Scene Menu (Optional)")]

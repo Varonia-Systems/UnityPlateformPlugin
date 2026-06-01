@@ -484,6 +484,13 @@ namespace VaroniaBackOffice
                         new GUIContent("Init Haptic Library",
                             "HapticLibraryAsset used during Striker initialization.")
                     );
+
+                    EditorGUILayout.PropertyField(
+                        so.FindProperty("InitStrikerLibraries"),
+                        new GUIContent("Extra Haptic Libraries",
+                            "Additional HapticLibraryAssets loaded at Striker startup, on top of 'Init Haptic Library'."),
+                        true
+                    );
                 }
             );
 #endif

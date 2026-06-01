@@ -112,8 +112,16 @@ public class Striker_Weapon : _Weapon
     {
         var settings = VaroniaRuntimeSettings.Load();
         
-        GetComponent<StrikerHaptics>().AddToLibrary( settings.InitStrikerLibrary);
-        
+        var haptics = GetComponent<StrikerHaptics>();
+        haptics.AddToLibrary(settings.InitStrikerLibrary);
+
+        // Librairies supplémentaires configurées dans Project Settings (null/doublons ignorés par AddToLibrary).
+        if (settings.InitStrikerLibraries != null)
+        {
+            foreach (var lib in settings.InitStrikerLibraries)
+                haptics.AddToLibrary(lib);
+        }
+
         
         Color C = Color.blue;
         
