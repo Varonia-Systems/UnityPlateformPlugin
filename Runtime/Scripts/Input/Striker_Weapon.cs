@@ -19,13 +19,13 @@ public class Striker_Weapon : _Weapon
 
     void Awake()
     {
-        gameObject.AddComponent<StrikerHaptics>();
+        striker= gameObject.AddComponent<StrikerDevice>();
     }
     
     
     IEnumerator Start()
     {  
-        striker = GetComponent<StrikerDevice>();
+        //striker = GetComponent<StrikerDevice>();
         var tracking = GetComponentInParent<VaroniaWeaponTracking>();
         _weaponIndex = tracking != null ? tracking.weaponIndex : 0;
         
