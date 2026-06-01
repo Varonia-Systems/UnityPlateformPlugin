@@ -1,6 +1,8 @@
 using System.Collections;
 using System.Collections.Generic;
+using System.Reflection;
 using UnityEngine;
+using UnityEngine.Events;
 using VaroniaBackOffice;
 using VBO_Ultimate.Runtime.Scripts.Input;
 
@@ -16,16 +18,58 @@ public class Striker_Weapon : _Weapon
     private int _weaponIndex;
 
 
-
-    void Awake()
+    static void InitUnityEvents(object obj)
     {
-        striker= gameObject.AddComponent<StrikerDevice>();
+        if (obj == null) return;
+
+        foreach (var f in obj.GetType().GetFields(BindingFlags.Public | BindingFlags.Instance))
+        {
+            var t = f.FieldType;
+
+            // UnityEvent (et dérivés génériques type DeviceEvent/GestureEvent)
+            if (typeof(UnityEventBase).IsAssignableFrom(t))
+            {
+                if (f.GetValue(obj) == null)
+                    f.SetValue(obj, System.Activator.CreateInstance(t));
+            }
+            // Conteneur [System.Serializable] (StrikerDeviceEvents, etc.)
+            else if (t.IsClass && t != typeof(string) && t.IsDefined(typeof(System.SerializableAttribute), false))
+            {
+                var inst = f.GetValue(obj) ?? System.Activator.CreateInstance(t);
+                f.SetValue(obj, inst);
+                InitUnityEvents(inst); // récursif sur les events internes
+            }
+        }
     }
-    
     
     IEnumerator Start()
     {  
         //striker = GetComponent<StrikerDevice>();
+        
+        
+        GameObject strikerObject = new GameObject("Striker");
+        strikerObject.SetActive(false);
+        strikerObject.transform.SetParent(transform, false);
+
+       
+      var A =  strikerObject.AddComponent<StrikerController>();
+        striker = strikerObject.AddComponent<StrikerDevice>();
+        striker.deviceOffsetRoot = transform;
+        
+        GetComponent<StrikerHaptics>().striker =  striker;
+        GetComponent<StrikerHaptics>().controller = A;
+        
+        
+        InitUnityEvents(A);        // OnClientConnected/Disconnected/Failed
+        InitUnityEvents(striker);  // tous les conteneurs + events internes
+        
+        
+        yield return new WaitForSeconds(0.3f);
+        strikerObject.SetActive(true);
+        
+        
+        
+        
         var tracking = GetComponentInParent<VaroniaWeaponTracking>();
         _weaponIndex = tracking != null ? tracking.weaponIndex : 0;
         

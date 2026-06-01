@@ -20,8 +20,8 @@ namespace VBO_Ultimate.Runtime.Scripts.Input
    
 
         // ── Fields ───────────────────────────────────────────────────────────────
-        public StrikerDevice _striker;
-        private StrikerController _controller;
+        public StrikerDevice striker;
+        public StrikerController controller;
 
         public List<HapticLibraryAsset> Library = new List<HapticLibraryAsset>();
         
@@ -45,8 +45,8 @@ namespace VBO_Ultimate.Runtime.Scripts.Input
 
         private void Start()
         {
-            _striker    = GetComponent<StrikerDevice>();
-            _controller = GetComponent<StrikerController>();
+          //  _striker    = GetComponent<StrikerDevice>();
+          //  _controller = GetComponent<StrikerController>();
         }
         
 
@@ -79,10 +79,10 @@ namespace VBO_Ultimate.Runtime.Scripts.Input
         /// </summary>
         public void PlayHaptic(HapticEffectAsset haptic)
         {
-            if (_striker == null || haptic == null)
+            if (striker == null || haptic == null)
                 return;
 
-            _striker.FireHaptic(haptic);
+            striker.FireHaptic(haptic);
         }
 
         /// <summary>
@@ -90,10 +90,10 @@ namespace VBO_Ultimate.Runtime.Scripts.Input
         /// </summary>
         public void PlayHaptic(string hapticName)
         {
-            if (_striker == null)
+            if (striker == null)
                 return;
 
-            _striker.FireHaptic(hapticName, hapticName);
+            striker.FireHaptic(hapticName, hapticName);
         }
 
         // ── Private helpers ──────────────────────────────────────────────────────
@@ -105,17 +105,17 @@ namespace VBO_Ultimate.Runtime.Scripts.Input
             
             IEnumerator IE()
             {
-
-                yield return new WaitUntil(() => _striker.isConnected);
+                yield return new WaitUntil(() => striker!=null);
+                yield return new WaitUntil(() => striker.isConnected);
                 Debug.Log("<color=yellow>[Striker] UpdateHapticLibrary</color>");
                 
-                if (_controller == null)
-                    _controller = GetComponent<StrikerController>();
+                if (controller == null)
+                    controller = GetComponent<StrikerController>();
 
-                if (_controller != null)
+                if (controller != null)
                 {
-                    _controller.hapticLibraries = Library;
-                    _controller.UpdateHapticLibrary();
+                    controller.hapticLibraries = Library;
+                    controller.UpdateHapticLibrary();
                 }
             }
         }
