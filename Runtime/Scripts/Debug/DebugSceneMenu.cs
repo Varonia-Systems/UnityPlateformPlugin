@@ -208,7 +208,8 @@ public class DebugSceneMenu : MonoBehaviour
         switch (_triggerPhase)
         {
             case TriggerPhase.Idle:
-                // F2/F3 fonctionnent en permanence (indépendamment du menu F1).
+                // F2/F3 ne s'arment que si le menu F1 est ouvert.
+                if (!_menuVisible) break;
                 if      (F2Pressed()) { _triggerPhase = TriggerPhase.Arming; _pendingIsF3 = false; _holdTimer = 0f; }
                 else if (F3Pressed()) { _triggerPhase = TriggerPhase.Arming; _pendingIsF3 = true;  _holdTimer = 0f; }
                 break;
