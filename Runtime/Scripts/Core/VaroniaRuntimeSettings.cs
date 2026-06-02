@@ -6,6 +6,28 @@ using StrikerLink.Unity.Runtime.HapticEngine;
 #endif
 namespace VaroniaBackOffice
 {
+    /// <summary>Une scène d'un tableau "Advanced Change Scene" : nom de scène + vignette.</summary>
+    [System.Serializable]
+    public class AdvancedSceneEntry
+    {
+        public string    sceneName   = "";
+        public string    description = "";
+        public Texture2D image;
+    }
+
+    /// <summary>
+    /// Un "tableau" de scènes affiché dans le menu F1 quand la valeur du champ sélecteur
+    /// GameConfig (<see cref="VaroniaRuntimeSettings.advancedSelectorField"/>) vaut
+    /// <see cref="matchValue"/>.
+    /// </summary>
+    [System.Serializable]
+    public class AdvancedSceneBoard
+    {
+        public string                   label     = "";   // titre affiché (optionnel)
+        public int                      matchValue = 0;    // valeur du sélecteur qui active ce tableau
+        public List<AdvancedSceneEntry> scenes    = new List<AdvancedSceneEntry>();
+    }
+
     /// <summary>
     /// Référence le prefab VaroniaManager pour l'auto-instanciation.
     /// Câblé automatiquement par VaroniaPackageWiring à l'ouverture de l'éditeur.
@@ -94,6 +116,26 @@ namespace VaroniaBackOffice
         /// </summary>
         public List<HapticLibraryAsset> InitStrikerLibraries = new List<HapticLibraryAsset>();
 #endif
+
+        [Header("Advanced Change Scene")]
+        /// <summary>
+        /// Si true, le menu F1 n'affiche plus la liste classique des scènes du build,
+        /// mais les tableaux personnalisés (<see cref="sceneBoards"/>) avec vignettes.
+        /// </summary>
+        public bool advancedChangeScene = false;
+
+        /// <summary>
+        /// Nom du champ GameConfig (int ou enum, choisi par réflexion dans Project Settings)
+        /// dont la valeur sélectionne le tableau à afficher. Vide / GameConfig absent →
+        /// on affiche le premier tableau.
+        /// </summary>
+        public string advancedSelectorField = "";
+
+        /// <summary>
+        /// Tableaux de scènes du mode avancé. Celui dont <see cref="AdvancedSceneBoard.matchValue"/>
+        /// égale la valeur courante du sélecteur est affiché (sinon le premier).
+        /// </summary>
+        public List<AdvancedSceneBoard> sceneBoards = new List<AdvancedSceneBoard>();
 
         [Header("Debug Scene Menu (Optional)")]
         /// <summary>

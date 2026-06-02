@@ -6,6 +6,7 @@
         "OpenVrBridge",
         "StrikerLink.Unity.Runtime",
         "Unity.XR.OpenXR",
+        "Unity.XR.Management",
         "SteamVR",
         "Vbo.GameConfig",
         "SteamVR_Actions",
@@ -33,6 +34,11 @@
             "name": "com.unity.xr.openvr.standalone",
             "expression": "0.0.1",
             "define": "OFFICIELOPENVR"
+        },
+        {
+            "name": "com.unity.xr.management",
+            "expression": "0.0.1",
+            "define": "XR_MANAGEMENT"
         }
     ],
     "noEngineReferences": false

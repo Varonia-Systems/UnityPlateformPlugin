@@ -348,6 +348,8 @@ namespace VaroniaBackOffice
             // Telemetry
             _panel.Add(MakeTelemetryRow("tracked :",   "no",           ColBad,   out _trackedValue));
             _panel.Add(MakeTelemetryRow("connected :", "disconnected", ColBad,   out _connectedValue));
+            // "disconnected" est plus long que "connected" → police un peu plus petite pour éviter le débordement.
+            _connectedValue.style.fontSize = 9;
             _batteryRow = MakeTelemetryRow("battery :", "—", ColValue, out _batteryValue);
             _batteryRow.style.display = DisplayStyle.None;
             _panel.Add(_batteryRow);

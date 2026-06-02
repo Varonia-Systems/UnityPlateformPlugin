@@ -110,6 +110,10 @@ namespace VaroniaBackOffice
             if (_orthoTex != null) { DestroyImmediate(_orthoTex); _orthoTex = null; }
         }
 
+        /// <summary>Live config currently edited in this window (or null). Used by
+        /// the scene-view boundary overlay to prefer live edits over the on-disk file.</summary>
+        internal Spatial GetLiveSpatial() => _configObj as Spatial;
+
         // ── Texture helpers ───────────────────────────────────────────────────────
 
         static Texture2D MakeTex(Color col)

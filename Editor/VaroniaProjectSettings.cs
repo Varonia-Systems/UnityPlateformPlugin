@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Reflection;
 using UnityEditor;
 using UnityEditor.Build;
@@ -495,6 +496,16 @@ namespace VaroniaBackOffice
             );
 #endif
 
+            // ── Section : Advanced Change Scene ──────────────────────────────────
+            DrawSectionCard(
+                "🗺  Advanced Change Scene",
+                "Replace the classic build-scene list in the F1 menu with custom boards of " +
+                "scenes (each with a thumbnail). The displayed board is selected by a GameConfig " +
+                "field (int/enum) chosen by reflection.",
+                ColorAccentGreen,
+                () => DrawAdvancedChangeScene(so)
+            );
+
             // ── Section : Game Config ───────────────────────────────────────────
             DrawSectionCard(
                 "📄  Game Config",
@@ -706,6 +717,198 @@ namespace VaroniaBackOffice
             EditorApplication.update -= DebouncedSaveTick;
             _savePending = false;
             AssetDatabase.SaveAssets();
+        }
+
+        // ─── Advanced Change Scene ──────────────────────────────────────────────────
+
+        private static void DrawAdvancedChangeScene(SerializedObject so)
+        {
+            var enableProp = so.FindProperty("advancedChangeScene");
+            EditorGUILayout.PropertyField(enableProp, new GUIContent(
+                "Enable Advanced Change Scene",
+                "When enabled, the F1 menu shows the custom scene boards below instead of the build-scene list."));
+
+            if (!enableProp.boolValue) return;
+
+            GUILayout.Space(6);
+            DrawSeparator(ColorSeparator);
+            GUILayout.Space(6);
+
+            // ── Champ sélecteur (int/enum du GameConfig, par réflexion) ──
+            var selProp = so.FindProperty("advancedSelectorField");
+            var fieldTypes = new Dictionary<string, Type>();
+            var fields = GetGameConfigIntEnumFields(fieldTypes);
+
+            Type selType = null;
+            if (fields.Count == 0)
+            {
+                EditorGUILayout.HelpBox(
+                    "Aucun champ int/enum trouvé dans GameConfig (GAME_CONFIG désactivé ou pas de champ adapté). " +
+                    "Le premier tableau sera toujours affiché.", MessageType.Info);
+            }
+            else
+            {
+                var options = new List<string> { "(aucun — premier tableau)" };
+                options.AddRange(fields);
+                int cur = string.IsNullOrEmpty(selProp.stringValue) ? 0 : fields.IndexOf(selProp.stringValue) + 1;
+                if (cur < 0) cur = 0;
+                int next = EditorGUILayout.Popup(new GUIContent("Selector Field (GameConfig)",
+                    "Champ int/enum du GameConfig dont la valeur sélectionne le tableau affiché."),
+                    cur, options.ToArray());
+                selProp.stringValue = next == 0 ? "" : fields[next - 1];
+                if (next > 0) fieldTypes.TryGetValue(fields[next - 1], out selType);
+            }
+
+            GUILayout.Space(6);
+
+            // ── Tableaux ──
+            var boardsProp   = so.FindProperty("sceneBoards");
+            string[] scenes  = GetBuildSceneNames();
+
+            for (int b = 0; b < boardsProp.arraySize; b++)
+            {
+                var board   = boardsProp.GetArrayElementAtIndex(b);
+                var labelP  = board.FindPropertyRelative("label");
+                var matchP  = board.FindPropertyRelative("matchValue");
+                var scenesP = board.FindPropertyRelative("scenes");
+
+                EditorGUILayout.BeginVertical(EditorStyles.helpBox);
+
+                EditorGUILayout.BeginHorizontal();
+                EditorGUILayout.LabelField($"Board #{b}", EditorStyles.boldLabel, GUILayout.Width(70));
+                labelP.stringValue = EditorGUILayout.TextField(labelP.stringValue);
+                bool removeBoard = GUILayout.Button("✕", GUILayout.Width(24));
+                EditorGUILayout.EndHorizontal();
+
+                if (removeBoard)
+                {
+                    boardsProp.DeleteArrayElementAtIndex(b);
+                    EditorGUILayout.EndVertical();
+                    break;
+                }
+
+                // Valeur de match : popup enum si le champ est un enum, sinon int.
+                if (selType != null && selType.IsEnum)
+                {
+                    var names  = Enum.GetNames(selType);
+                    var values = Enum.GetValues(selType);
+                    int idx = 0;
+                    for (int i = 0; i < values.Length; i++)
+                        if ((int)values.GetValue(i) == matchP.intValue) { idx = i; break; }
+                    int nidx = EditorGUILayout.Popup(new GUIContent("Match Value",
+                        "Valeur du sélecteur qui active ce tableau."), idx, names);
+                    matchP.intValue = (int)values.GetValue(Mathf.Clamp(nidx, 0, values.Length - 1));
+                }
+                else
+                {
+                    matchP.intValue = EditorGUILayout.IntField(new GUIContent("Match Value",
+                        "Valeur du sélecteur qui active ce tableau."), matchP.intValue);
+                }
+
+                GUILayout.Space(4);
+                EditorGUILayout.LabelField("Scenes", EditorStyles.miniBoldLabel);
+
+                int sceneToRemove = -1;
+                for (int s = 0; s < scenesP.arraySize; s++)
+                {
+                    var entry = scenesP.GetArrayElementAtIndex(s);
+                    var nameP = entry.FindPropertyRelative("sceneName");
+                    var descP = entry.FindPropertyRelative("description");
+                    var imgP  = entry.FindPropertyRelative("image");
+
+                    EditorGUILayout.BeginHorizontal();
+
+                    // Dropdown des scènes du build (avec marqueur si la valeur n'y est plus).
+                    int sceneIdx = Array.IndexOf(scenes, nameP.stringValue);
+                    if (sceneIdx < 0 && !string.IsNullOrEmpty(nameP.stringValue))
+                    {
+                        var opts = new List<string> { nameP.stringValue + "  (hors build)" };
+                        opts.AddRange(scenes);
+                        int ni = EditorGUILayout.Popup(0, opts.ToArray());
+                        if (ni > 0) nameP.stringValue = scenes[ni - 1];
+                    }
+                    else if (scenes.Length > 0)
+                    {
+                        int ni = EditorGUILayout.Popup(Mathf.Max(0, sceneIdx), scenes);
+                        nameP.stringValue = scenes[Mathf.Clamp(ni, 0, scenes.Length - 1)];
+                    }
+                    else
+                    {
+                        EditorGUILayout.LabelField("(aucune scène dans le build)");
+                    }
+
+                    imgP.objectReferenceValue = EditorGUILayout.ObjectField(
+                        imgP.objectReferenceValue, typeof(Texture2D), false,
+                        GUILayout.Width(64), GUILayout.Height(48));
+
+                    if (GUILayout.Button("✕", GUILayout.Width(24), GUILayout.Height(48)))
+                        sceneToRemove = s;
+
+                    EditorGUILayout.EndHorizontal();
+
+                    descP.stringValue = EditorGUILayout.TextField(
+                        new GUIContent("Description", "Texte affiché sous le nom de la scène dans le menu F1."),
+                        descP.stringValue);
+                    EditorGUILayout.Space(3);
+                }
+
+                if (sceneToRemove >= 0)
+                    scenesP.DeleteArrayElementAtIndex(sceneToRemove);
+
+                if (GUILayout.Button("+ Add Scene"))
+                    scenesP.InsertArrayElementAtIndex(scenesP.arraySize);
+
+                EditorGUILayout.EndVertical();
+                GUILayout.Space(4);
+            }
+
+            if (GUILayout.Button("+ Add Board"))
+                boardsProp.InsertArrayElementAtIndex(boardsProp.arraySize);
+        }
+
+        private static List<string> GetGameConfigIntEnumFields(Dictionary<string, Type> typesOut)
+        {
+            var names = new List<string>();
+            Type gc = FindGameConfigType();
+            if (gc == null) return names;
+
+            foreach (var f in gc.GetFields(BindingFlags.Public | BindingFlags.Instance))
+                if (f.FieldType == typeof(int) || f.FieldType.IsEnum)
+                { names.Add(f.Name); typesOut[f.Name] = f.FieldType; }
+
+            foreach (var p in gc.GetProperties(BindingFlags.Public | BindingFlags.Instance))
+                if (p.CanRead && (p.PropertyType == typeof(int) || p.PropertyType.IsEnum) && !typesOut.ContainsKey(p.Name))
+                { names.Add(p.Name); typesOut[p.Name] = p.PropertyType; }
+
+            return names;
+        }
+
+        private static Type FindGameConfigType()
+        {
+            foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                Type t = null;
+                try { t = asm.GetType("VaroniaBackOffice.GameConfig"); } catch { }
+                if (t != null) return t;
+            }
+            foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
+            {
+                Type[] types;
+                try { types = asm.GetTypes(); } catch { continue; }
+                foreach (var t in types) if (t.Name == "GameConfig") return t;
+            }
+            return null;
+        }
+
+        private static string[] GetBuildSceneNames()
+        {
+            var list = new List<string>();
+            foreach (var s in EditorBuildSettings.scenes)
+            {
+                if (string.IsNullOrEmpty(s.path)) continue;
+                list.Add(Path.GetFileNameWithoutExtension(s.path));
+            }
+            return list.ToArray();
         }
 
         // ─── Composants UI ────────────────────────────────────────────────────────

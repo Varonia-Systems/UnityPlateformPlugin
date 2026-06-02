@@ -827,6 +827,7 @@ namespace VaroniaBackOffice
                     }
                 }
                 e.Use(); Repaint();
+                SpatialBoundarySceneOverlay.RequestRepaint(); // live-sync the scene overlay
             }
 
             if (e.type == EventType.MouseUp && _dragKind != DragKind.None)
@@ -834,6 +835,7 @@ namespace VaroniaBackOffice
                 _dragKind = DragKind.None;
                 _dragOriginalPoints = null;
                 e.Use(); Repaint();
+                SpatialBoundarySceneOverlay.RequestRepaint();
             }
 
             // Repaint when hovering for HUD
