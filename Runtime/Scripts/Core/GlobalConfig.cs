@@ -23,6 +23,8 @@ namespace VaroniaBackOffice
         PICO_VSVR_HK416 = 416,
         PICO_VSVR_Glock = 417,
         VORTEX_WEAPON_FOCUS = 501,
+        
+        HMD = 777,
     }
 
 

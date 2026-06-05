@@ -1,5 +1,4 @@
 ﻿using UnityEngine;
-using UnityEngine.SceneManagement;
 #if ENABLE_INPUT_SYSTEM
 using UnityEngine.InputSystem;
 #endif
@@ -17,13 +16,6 @@ namespace VaroniaBackOffice
     {
         // ─── Config ───────────────────────────────────────────────────────────────
 
-        [Header("Rig")]
-        [Tooltip("Le Transform root de la caméra (Rig). Si vide, utilise ce GameObject.")]
-        [SerializeField] private Transform rig;
-
-        [Tooltip("La caméra dont on lit la direction horizontale. Si vide, utilise Camera.main.")]
-        [SerializeField] private Camera    cam;
-
         [Header("Speed")]
         [SerializeField] private float moveSpeed     = 3f;
         [SerializeField] private float fastMultiplier = 4f;
@@ -31,55 +23,14 @@ namespace VaroniaBackOffice
 
         // ─────────────────────────────────────────────────────────────────────────
 
-        private void Reset()
-        {
-            AutoFillReferences();
-        }
-
-        private void Awake()
-        {
-            AutoFillReferences();
-        }
-
-        private void OnEnable()
-        {
-            SceneManager.sceneLoaded += OnSceneLoaded;
-        }
-
-        private void OnDisable()
-        {
-            SceneManager.sceneLoaded -= OnSceneLoaded;
-        }
-
-        private void OnSceneLoaded(Scene _, LoadSceneMode __)
-        {
-            // Les refs d'une scène précédente sont périmées : on force la recherche.
-            rig = null;
-            cam = null;
-            AutoFillReferences();
-        }
-
-        private void AutoFillReferences()
-        {
-            if (rig == null)
-            {
-#if UNITY_2022_2_OR_NEWER
-                var sync = FindFirstObjectByType<VaroniaSync>();
-#else
-                var sync = FindObjectOfType<VaroniaSync>();
-#endif
-                if (sync != null) rig = sync.transform;
-            }
-            if (cam == null)
-            {
-                cam = Camera.main;
-                if (cam == null && rig != null) cam = rig.GetComponentInChildren<Camera>();
-            }
-        }
-
         private void Update()
         {
-            if (rig == null || cam == null) AutoFillReferences();
+            // Références lues directement depuis le BackOffice (source de vérité).
+            if (BackOfficeVaronia.Instance == null) return;
+
+            Transform rig = BackOfficeVaronia.Instance.Rig;
+            Camera    cam = BackOfficeVaronia.Instance.MainCamera;
+
             if (rig == null) return;
             if (!DebugModeOverlay.IsSuperDebugMode) return;
 

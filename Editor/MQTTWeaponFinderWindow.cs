@@ -18,6 +18,15 @@ namespace VaroniaBackOffice
         private string _foundMac = "";
         private Dictionary<string, (bool primary, bool secondary)> _deviceStates = new Dictionary<string, (bool, bool)>();
 
+        // ── Mode de détection ──
+        private enum FindMode { PrimarySecondary = 0, PrimaryOnly = 1 }
+        private FindMode _mode = FindMode.PrimarySecondary;
+        private static readonly string[] ModeLabels =
+        {
+            "Primary + Secondary (recommandé)",
+            "Tir principal seul (risque d'erreur +)"
+        };
+
         // Styles & Colors
         private static readonly Color colBg = new Color(0.11f, 0.11f, 0.14f, 1f);
         private static readonly Color colCard = new Color(0.15f, 0.15f, 0.19f, 1f);
@@ -164,9 +173,26 @@ namespace VaroniaBackOffice
             
             EditorGUILayout.LabelField("Broker IP:", _brokerAddress, EditorStyles.boldLabel);
             GUILayout.Space(5);
-            
+
+            // ── Mode de détection (verrouillé pendant le scan) ──
+            using (new EditorGUI.DisabledScope(_isScanning))
+            {
+                _mode = (FindMode)EditorGUILayout.Popup("Mode", (int)_mode, ModeLabels);
+            }
+            if (_mode == FindMode.PrimaryOnly)
+            {
+                EditorGUILayout.HelpBox(
+                    "Écoute uniquement le tir principal : détection plus rapide, mais risque de faux " +
+                    "positif plus élevé (toute arme qui tire pendant le scan sera prise).",
+                    MessageType.Warning);
+            }
+            GUILayout.Space(5);
+
             EditorGUILayout.LabelField("Instructions:", EditorStyles.boldLabel);
-            GUILayout.Label("1. Click 'Start Scan'\n2. Press Primary and Secondary triggers simultaneously on your weapon.", _labelStyle);
+            string step2 = _mode == FindMode.PrimaryOnly
+                ? "2. Appuyez sur la gâchette principale (tir) de votre arme."
+                : "2. Appuyez simultanément sur les gâchettes Primary et Secondary de votre arme.";
+            GUILayout.Label("1. Click 'Start Scan'\n" + step2, _labelStyle);
 
             GUILayout.Space(15);
 
@@ -265,7 +291,13 @@ namespace VaroniaBackOffice
 
             _deviceStates[mac] = state;
 
-            if (state.primary && state.secondary)
+            // Mode "Primary only" : on déclenche dès le tir principal.
+            // Mode "Primary + Secondary" : il faut les deux gâchettes ensemble (plus sûr).
+            bool found = _mode == FindMode.PrimaryOnly
+                ? state.primary
+                : (state.primary && state.secondary);
+
+            if (found)
             {
                 _foundMac = mac;
                 // On utilise delayCall car on est dans un thread MQTT

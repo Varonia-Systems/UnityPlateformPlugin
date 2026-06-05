@@ -38,6 +38,8 @@ namespace VaroniaBackOffice
         // ─── Weapon ──────────────────────────────────────────────────────────────
         private int _weaponIndex;
         private VaroniaWeaponTracking tracking;
+        private MQTTInput _mqttInput;   // alternative à VaroniaWeaponTracking (script d'input simplifié)
+        private bool _indexResolved;    // l'index d'arme a été déterminé (MQTTInput résout au Start, donc tardivement)
 
         // ─── État ────────────────────────────────────────────────────────────────
         private float _lastInputTime = -1f;
@@ -53,11 +55,39 @@ namespace VaroniaBackOffice
             tracking = GetComponentInParent<VaroniaWeaponTracking>();
             if (tracking != null)
             {
-                _weaponIndex = tracking.weaponIndex;
-                margin.y = margin.y + _weaponIndex * (size.y);
+                _weaponIndex   = tracking.weaponIndex;
+                margin.y       = margin.y + _weaponIndex * (size.y);
+                _indexResolved = true;
+            }
+            else
+            {
+                // Pas de VaroniaWeaponTracking → on tente le script d'input simplifié MQTTInput,
+                // dont l'index est résolu au Start (donc plus tard) → résolution paresseuse.
+                _mqttInput     = GetComponentInParent<MQTTInput>();
+                _indexResolved = (_mqttInput == null); // aucun fournisseur → on garde l'index 0
             }
             VaroniaInput.OnButtonChanged += OnButtonChangedHandler;
             OnMovieChanged();
+        }
+
+        private void OnButtonChangedHandler(int weaponIndex, VaroniaButton button, bool pressed)
+        {
+            if (weaponIndex == _weaponIndex && pressed)
+                _lastInputTime = Time.unscaledTime;
+        }
+
+        /// <summary>Résout l'index d'arme depuis MQTTInput une fois qu'il est prêt (Start asynchrone).</summary>
+        private void EnsureWeaponIndex()
+        {
+            if (_indexResolved) return;
+            if (_mqttInput == null || !_mqttInput.Resolved) return;
+
+            _weaponIndex   = _mqttInput.WeaponIndex;
+            margin.y       = margin.y + _weaponIndex * (size.y);
+            _indexResolved = true;
+#if VBO_UITOOLKIT_OVERLAYS
+            PositionPanel_UITK(); // la marge a changé → on repositionne le panneau
+#endif
         }
 
         private void OnEnable()
@@ -103,10 +133,13 @@ namespace VaroniaBackOffice
 #endif
         }
 
-        private void OnButtonChangedHandler(int weaponIndex, VaroniaButton button, bool pressed)
+        /// <summary>Titre du panneau : nom de l'enum Controller si la source est un MQTTInput,
+        /// sinon le modèle VaroniaInput, sinon "INPUT VARONIA".</summary>
+        private string TitleText()
         {
-            if (weaponIndex == _weaponIndex && pressed)
-                _lastInputTime = Time.unscaledTime;
+            if (_mqttInput != null) return _mqttInput.controller.ToString();
+            string model = VaroniaInput.GetModel(_weaponIndex);
+            return !string.IsNullOrEmpty(model) ? model : "INPUT VARONIA";
         }
 
         // ═══════════════════════════════════════════════════════════════════════
@@ -115,6 +148,8 @@ namespace VaroniaBackOffice
 
         private void Update()
         {
+            EnsureWeaponIndex();
+
             if (DebugModeOverlay.IsSuperDebugMode)
             {
 #if ENABLE_INPUT_SYSTEM
@@ -173,8 +208,7 @@ namespace VaroniaBackOffice
             if (_panel == null) return;
 
             // Title — change rarement, compare strings ref-first
-            string title = !string.IsNullOrEmpty(VaroniaInput.GetModel(_weaponIndex))
-                ? VaroniaInput.GetModel(_weaponIndex) : "INPUT VARONIA";
+            string title = TitleText();
             if (!ReferenceEquals(title, _lastTitleShown) && title != _lastTitleShown)
             {
                 _lastTitleShown = title;
@@ -192,30 +226,31 @@ namespace VaroniaBackOffice
             UpdateBtn(2, b2, isDebug);
             UpdateBtn(3, b3, isDebug);
 
-            // Last input — round à 0.1s
-            float elapsed = _lastInputTime < 0f ? -1f : Mathf.Round((Time.unscaledTime - _lastInputTime) * 10f) / 10f;
-            if (elapsed != _lastLastInputShown)
+            // last input / tracked / connected — seulement s'ils ont été construits (source non-MQTTInput).
+            if (_lastInputValue != null)
             {
-                _lastLastInputShown = elapsed;
-                _lastInputValue.text = elapsed < 0f ? "—" : elapsed.ToString("F1") + " s";
-            }
+                float elapsed = _lastInputTime < 0f ? -1f : Mathf.Round((Time.unscaledTime - _lastInputTime) * 10f) / 10f;
+                if (elapsed != _lastLastInputShown)
+                {
+                    _lastLastInputShown = elapsed;
+                    _lastInputValue.text = elapsed < 0f ? "—" : elapsed.ToString("F1") + " s";
+                }
 
-            // Telemetry tracked
-            bool isTracked = tracking != null && tracking.trackerFollower != null && tracking.trackerFollower.isTracking;
-            if (isTracked != _lastTrackedState)
-            {
-                _lastTrackedState = isTracked;
-                _trackedValue.text = isTracked ? "yes" : "no";
-                _trackedValue.style.color = isTracked ? ColGood : ColBad;
-            }
+                bool isTracked = tracking != null && tracking.trackerFollower != null && tracking.trackerFollower.isTracking;
+                if (isTracked != _lastTrackedState)
+                {
+                    _lastTrackedState = isTracked;
+                    _trackedValue.text = isTracked ? "yes" : "no";
+                    _trackedValue.style.color = isTracked ? ColGood : ColBad;
+                }
 
-            // Telemetry connected
-            bool isConn = VaroniaInput.GetIsConnected(_weaponIndex);
-            if (isConn != _lastConnState)
-            {
-                _lastConnState = isConn;
-                _connectedValue.text = isConn ? "connected" : "disconnected";
-                _connectedValue.style.color = isConn ? ColGood : ColBad;
+                bool isConn = VaroniaInput.GetIsConnected(_weaponIndex);
+                if (isConn != _lastConnState)
+                {
+                    _lastConnState = isConn;
+                    _connectedValue.text = isConn ? "connected" : "disconnected";
+                    _connectedValue.style.color = isConn ? ColGood : ColBad;
+                }
             }
 
             // Battery
@@ -336,21 +371,26 @@ namespace VaroniaBackOffice
                 _btnLabels[i] = lbl;
             }
 
-            // Last input
-            var lastLbl = MakeLabel("last input :", 9, FontStyle.Normal, ColMuted, TextAnchor.MiddleLeft);
-            lastLbl.style.height = 16; lastLbl.style.marginTop = 6;
-            _panel.Add(lastLbl);
+            // last input / tracked / connected : construits UNIQUEMENT si la source n'est pas un MQTTInput.
+            if (_mqttInput == null)
+            {
+                var lastLbl = MakeLabel("last input :", 9, FontStyle.Normal, ColMuted, TextAnchor.MiddleLeft);
+                lastLbl.style.height = 16; lastLbl.style.marginTop = 6;
+                _panel.Add(lastLbl);
 
-            _lastInputValue = MakeLabel("—", 11, FontStyle.Bold, ColValue, TextAnchor.MiddleLeft);
-            _lastInputValue.style.height = 16;
-            _panel.Add(_lastInputValue);
+                _lastInputValue = MakeLabel("—", 11, FontStyle.Bold, ColValue, TextAnchor.MiddleLeft);
+                _lastInputValue.style.height = 16;
+                _panel.Add(_lastInputValue);
+
+                _panel.Add(MakeTelemetryRow("tracked :",   "no",           ColBad, out _trackedValue));
+                _panel.Add(MakeTelemetryRow("connected :", "disconnected", ColBad, out _connectedValue));
+                // "disconnected" plus long que "connected" → police un peu réduite.
+                _connectedValue.style.fontSize = 9;
+            }
 
             // Telemetry
-            _panel.Add(MakeTelemetryRow("tracked :",   "no",           ColBad,   out _trackedValue));
-            _panel.Add(MakeTelemetryRow("connected :", "disconnected", ColBad,   out _connectedValue));
-            // "disconnected" est plus long que "connected" → police un peu plus petite pour éviter le débordement.
-            _connectedValue.style.fontSize = 9;
             _batteryRow = MakeTelemetryRow("battery :", "—", ColValue, out _batteryValue);
+            _batteryRow.style.marginTop = 6;
             _batteryRow.style.display = DisplayStyle.None;
             _panel.Add(_batteryRow);
             _rssiRow = MakeTelemetryRow("rssi :", "—", ColValue, out _rssiValue);
@@ -440,9 +480,7 @@ namespace VaroniaBackOffice
             float lx  = panel.x + 10f * scale;
             float pad = 6f * scale;
             float titleH = 18f * scale;
-            string title = !string.IsNullOrEmpty(VaroniaInput.GetModel(_weaponIndex))
-                ? VaroniaInput.GetModel(_weaponIndex) : "INPUT VARONIA";
-            GUI.Label(new Rect(lx, panel.y + pad, W - 14f * scale, titleH), title, _titleStyle);
+            GUI.Label(new Rect(lx, panel.y + pad, W - 14f * scale, titleH), TitleText(), _titleStyle);
 
             float btnAreaY = panel.y + pad + titleH + 4f * scale;
             float btnSize = 28f * scale;
@@ -467,22 +505,26 @@ namespace VaroniaBackOffice
                 GUI.Label(new Rect(bx, btnAreaY, btnSize, btnSize), labels[i], _btnLabelStyle);
             }
 
-            float lastY = btnAreaY + btnSize + 6f * scale;
-            GUI.Label(new Rect(lx, lastY, W - 14f * scale, 16f * scale), "last input :", _lastInputLabelStyle);
+            float telY = btnAreaY + btnSize + 8f * scale;
 
-            string lastVal = _lastInputTime < 0f
-                ? "—" : (Time.unscaledTime - _lastInputTime).ToString("F1") + " s";
-            GUI.Label(new Rect(lx, lastY + 16f * scale, W - 14f * scale, 16f * scale), lastVal, _lastInputValueStyle);
+            // last input / tracked / connected : masqués UNIQUEMENT si la source est un MQTTInput.
+            if (_mqttInput == null)
+            {
+                GUI.Label(new Rect(lx, telY, W - 14f * scale, 16f * scale), "last input :", _lastInputLabelStyle);
+                string lastVal = _lastInputTime < 0f
+                    ? "—" : (Time.unscaledTime - _lastInputTime).ToString("F1") + " s";
+                GUI.Label(new Rect(lx, telY + 16f * scale, W - 14f * scale, 16f * scale), lastVal, _lastInputValueStyle);
+                telY += 16f * scale + 18f * scale;
 
-            float telY = lastY + 16f * scale + 18f * scale;
-            bool isTracked = tracking != null && tracking.trackerFollower != null && tracking.trackerFollower.isTracking;
-            DrawTelemetryRow(lx, telY, W, "tracked :", isTracked ? "yes" : "no", isTracked ? ColGood : ColBad, scale);
-            telY += 16f * scale;
+                bool isTracked = tracking != null && tracking.trackerFollower != null && tracking.trackerFollower.isTracking;
+                DrawTelemetryRow(lx, telY, W, "tracked :", isTracked ? "yes" : "no", isTracked ? ColGood : ColBad, scale);
+                telY += 16f * scale;
 
-            string connLabel = VaroniaInput.GetIsConnected(_weaponIndex) ? "connected" : "disconnected";
-            Color  connColor = VaroniaInput.GetIsConnected(_weaponIndex) ? ColGood : ColBad;
-            DrawTelemetryRow(lx, telY, W, "connected :", connLabel, connColor, scale);
-            telY += 16f * scale;
+                string connLabel = VaroniaInput.GetIsConnected(_weaponIndex) ? "connected" : "disconnected";
+                Color  connColor = VaroniaInput.GetIsConnected(_weaponIndex) ? ColGood : ColBad;
+                DrawTelemetryRow(lx, telY, W, "connected :", connLabel, connColor, scale);
+                telY += 16f * scale;
+            }
 
             if (VaroniaInput.GetBattery(_weaponIndex) != 0)
             {

@@ -26,6 +26,9 @@ namespace VaroniaBackOffice
         private string _newValue     = "";
         private bool   _newBoolValue;
         private int    _newTypeIdx;
+
+        // Profils (debug)
+        private string _newProfileName = "";
         private static readonly string[] TypeLabels = { "string", "int", "float", "bool" };
 
         // ── Style cache ──
@@ -357,6 +360,18 @@ namespace VaroniaBackOffice
             }
 
             _scroll = EditorGUILayout.BeginScrollView(_scroll, GUIStyle.none, GUIStyle.none);
+
+            // ── Profiles card (debug : plusieurs configs cachées) — en haut pour être visible ──
+            DrawCard(() =>
+            {
+                DrawSectionLabel("PROFILES  ·  DEBUG SWITCH");
+                EditorGUILayout.Space(4);
+                DrawDivider();
+                EditorGUILayout.Space(6);
+                DrawProfiles();
+            }, colWarn);
+
+            EditorGUILayout.Space(8);
 
             // ── Known fields card ──
             DrawCard(() =>
@@ -938,22 +953,181 @@ namespace VaroniaBackOffice
                 return;
             }
 
-            var jObj = new JObject();
-            foreach (var field in _knownFields)
-            {
-                var v = field.GetValue(_configObj);
-                jObj[field.Name] = v != null ? JToken.FromObject(v) : JValue.CreateNull();
-            }
-            foreach (var kvp in _extraFields)
-                jObj[kvp.Key] = kvp.Value;
-
             string dir = Path.GetDirectoryName(_savePath);
             if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
                 Directory.CreateDirectory(dir);
 
-            File.WriteAllText(_savePath, jObj.ToString(Formatting.Indented));
+            File.WriteAllText(_savePath, BuildCurrentJObject().ToString(Formatting.Indented));
             _isDirty = false;
             Debug.Log($"[Config Editor] Sauvegardé → {_savePath}");
+        }
+
+        /// <summary>Construit le JObject de la config en mémoire (known fields + extra fields).</summary>
+        private JObject BuildCurrentJObject()
+        {
+            var jObj = new JObject();
+            if (_knownFields != null)
+                foreach (var field in _knownFields)
+                {
+                    var v = field.GetValue(_configObj);
+                    jObj[field.Name] = v != null ? JToken.FromObject(v) : JValue.CreateNull();
+                }
+            foreach (var kvp in _extraFields)
+                jObj[kvp.Key] = kvp.Value;
+            return jObj;
+        }
+
+        // ─── Profils (debug : plusieurs GlobalConfig "cachés", switch rapide) ───────
+
+        /// <summary>Dossier des profils, à côté du GlobalConfig.json actif.</summary>
+        private string ProfilesDir()
+        {
+            string dir = Path.GetDirectoryName(_savePath);
+            return string.IsNullOrEmpty(dir) ? null : Path.Combine(dir, "Profiles");
+        }
+
+        private string[] ListProfiles()
+        {
+            string pdir = ProfilesDir();
+            if (string.IsNullOrEmpty(pdir) || !Directory.Exists(pdir)) return System.Array.Empty<string>();
+            var files = Directory.GetFiles(pdir, "*.json");
+            var names = new string[files.Length];
+            for (int i = 0; i < files.Length; i++) names[i] = Path.GetFileNameWithoutExtension(files[i]);
+            System.Array.Sort(names);
+            return names;
+        }
+
+        private static string SanitizeProfileName(string name)
+        {
+            if (string.IsNullOrWhiteSpace(name)) return null;
+            foreach (var c in Path.GetInvalidFileNameChars()) name = name.Replace(c, '_');
+            return name.Trim();
+        }
+
+        /// <summary>Sauve la config en mémoire comme profil nommé (n'altère pas le GlobalConfig.json actif).</summary>
+        private void SaveProfile(string rawName)
+        {
+            if (_configObj == null) return;
+            string name = SanitizeProfileName(rawName);
+            if (name == null) { Debug.LogWarning("[Config Editor] Nom de profil invalide."); return; }
+
+            string pdir = ProfilesDir();
+            if (!Directory.Exists(pdir)) Directory.CreateDirectory(pdir);
+
+            string path = Path.Combine(pdir, name + ".json");
+            File.WriteAllText(path, BuildCurrentJObject().ToString(Formatting.Indented));
+            AssetDatabase.Refresh();
+            Debug.Log($"[Config Editor] Profil sauvegardé → {path}");
+        }
+
+        /// <summary>Bascule : copie le profil dans le GlobalConfig.json actif puis recharge.</summary>
+        private void SwitchToProfile(string name)
+        {
+            string pdir = ProfilesDir();
+            string path = Path.Combine(pdir, name + ".json");
+            if (!File.Exists(path)) { Debug.LogWarning($"[Config Editor] Profil introuvable : {path}"); return; }
+
+            if (!EditorUtility.DisplayDialog("Switch GlobalConfig",
+                $"Remplacer le GlobalConfig actif par le profil « {name} » ?\n\n" +
+                "Les modifications non sauvegardées de la config actuelle seront perdues.",
+                "Switch", "Annuler"))
+                return;
+
+            string activeDir = Path.GetDirectoryName(_savePath);
+            if (!string.IsNullOrEmpty(activeDir) && !Directory.Exists(activeDir))
+                Directory.CreateDirectory(activeDir);
+
+            File.Copy(path, _savePath, true);
+            Refresh();
+            Debug.Log($"[Config Editor] Profil « {name} » activé.");
+            GUIUtility.ExitGUI(); // la mise en page a changé (Refresh) → on termine proprement la frame IMGUI
+        }
+
+        private void DeleteProfile(string name)
+        {
+            string pdir = ProfilesDir();
+            string path = Path.Combine(pdir, name + ".json");
+            if (!File.Exists(path)) return;
+
+            if (!EditorUtility.DisplayDialog("Supprimer le profil",
+                $"Supprimer définitivement le profil « {name} » ?", "Supprimer", "Annuler"))
+                return;
+
+            File.Delete(path);
+            string meta = path + ".meta";
+            if (File.Exists(meta)) File.Delete(meta);
+            AssetDatabase.Refresh();
+            Debug.Log($"[Config Editor] Profil « {name} » supprimé.");
+        }
+
+        private void DrawProfiles()
+        {
+            var profiles = ListProfiles();
+
+            if (profiles.Length == 0)
+            {
+                GUILayout.Label("Aucun profil. Sauvegardez la config courante ci-dessous.", readOnlyStyle);
+            }
+            else
+            {
+                foreach (var name in profiles)
+                {
+                    EditorGUILayout.BeginHorizontal();
+                    GUILayout.Label(name, fieldLabelStyle, GUILayout.MinWidth(80));
+                    GUILayout.FlexibleSpace();
+
+                    if (GUILayout.Button(new GUIContent("Switch",
+                        "Remplace le GlobalConfig actif par ce profil et recharge."),
+                        buttonStyle, GUILayout.Width(70), GUILayout.Height(22)))
+                        SwitchToProfile(name);
+
+                    if (GUILayout.Button(new GUIContent("Overwrite",
+                        "Écrase ce profil avec la config actuellement affichée."),
+                        buttonStyle, GUILayout.Width(82), GUILayout.Height(22)))
+                        SaveProfile(name);
+
+                    var del = new GUIStyle(buttonStyle);
+                    del.normal.textColor = colError;
+                    del.hover.textColor  = Color.white;
+                    if (GUILayout.Button(new GUIContent("✕", "Supprimer ce profil."),
+                        del, GUILayout.Width(26), GUILayout.Height(22)))
+                        DeleteProfile(name);
+
+                    EditorGUILayout.EndHorizontal();
+                    EditorGUILayout.Space(2);
+                }
+            }
+
+            EditorGUILayout.Space(6);
+            DrawDivider();
+            EditorGUILayout.Space(6);
+
+            // Sauver la config courante comme nouveau profil.
+            EditorGUILayout.BeginHorizontal();
+            GUILayout.Label(new GUIContent("Save current as",
+                "Sauve la config affichée comme nouveau profil (n'altère pas le GlobalConfig actif)."),
+                fieldLabelStyle, GUILayout.Width(110));
+            _newProfileName = EditorGUILayout.TextField(_newProfileName);
+
+            using (new EditorGUI.DisabledScope(string.IsNullOrWhiteSpace(_newProfileName)))
+            {
+                if (GUILayout.Button("Save", buttonStyle, GUILayout.Width(70), GUILayout.Height(20)))
+                {
+                    string n = _newProfileName;
+                    _newProfileName = "";
+                    GUI.FocusControl(null);
+                    SaveProfile(n);
+                }
+            }
+            EditorGUILayout.EndHorizontal();
+
+            string pdir = ProfilesDir();
+            if (!string.IsNullOrEmpty(pdir))
+            {
+                EditorGUILayout.Space(2);
+                var pathStyle = new GUIStyle(footerStyle) { wordWrap = true, alignment = TextAnchor.MiddleLeft };
+                GUILayout.Label(new GUIContent("→ " + pdir, "Dossier de stockage des profils."), pathStyle);
+            }
         }
 
         // ─── Helpers ──────────────────────────────────────────────────────────────

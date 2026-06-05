@@ -27,6 +27,9 @@ namespace VaroniaBackOffice
         // Keys claimed by addons — excluded from the generic extra-fields card.
         private readonly HashSet<string> _claimedKeys = new HashSet<string>();
 
+        // Demandé par un addon (ex. après son scan) pour recalculer claimed keys + extra fields.
+        private bool _needsExtraRecompute;
+
         // "Add field" form state
         private string _newKey       = "";
         private string _newValue     = "";
@@ -305,6 +308,23 @@ namespace VaroniaBackOffice
             }
         }
 
+        /// <summary>
+        /// Recalcule l'ensemble des clés revendiquées par les addons (ClaimedKeys) puis
+        /// reconstruit la liste des champs supplémentaires en les excluant. Appelé après
+        /// qu'un addon a scanné (ses ClaimedKeys ont changé).
+        /// </summary>
+        private void RecomputeClaimedKeysAndExtras()
+        {
+            _claimedKeys.Clear();
+            foreach (var addon in GameConfigAddons.Registered)
+            {
+                if (addon.ClaimedKeys == null) continue;
+                foreach (var key in addon.ClaimedKeys)
+                    if (!string.IsNullOrEmpty(key)) _claimedKeys.Add(key);
+            }
+            LoadExtraFields();
+        }
+
         private void LoadExtraFields()
         {
             _extraFields.Clear();
@@ -329,6 +349,16 @@ namespace VaroniaBackOffice
 
         private void OnGUI()
         {
+            // Recompute demandé par un addon après son scan : les clés [EditValue] deviennent
+            // "claimed" et ne doivent plus apparaître dans la carte "champs supplémentaires".
+            // Fait tout en haut d'OnGUI → _extraFields a le MÊME contenu sur les passes Layout
+            // et Repaint de la frame (sinon IMGUI râle sur le nombre de contrôles).
+            if (_needsExtraRecompute)
+            {
+                _needsExtraRecompute = false;
+                RecomputeClaimedKeysAndExtras();
+            }
+
             BuildStyles();
 
             // Full-window dark background
@@ -502,7 +532,8 @@ namespace VaroniaBackOffice
             {
                 EditorGUILayout.BeginHorizontal();
                 GUILayout.Label($"[{kvp.Value.Type}]", badgeStyle, GUILayout.Width(60));
-                GUILayout.Label(kvp.Key, fieldLabelStyle, GUILayout.Width(110));
+                // Largeur élargie + tooltip = nom complet (les clés longues ne sont plus coupées).
+                GUILayout.Label(new GUIContent(kvp.Key, kvp.Key), fieldLabelStyle, GUILayout.Width(200));
 
                 JToken edited = DrawJTokenEditor(kvp.Value);
                 if (edited.ToString() != kvp.Value.ToString())
@@ -604,6 +635,20 @@ namespace VaroniaBackOffice
             if (GUILayout.Button("RAFRAÎCHIR", buttonStyle, GUILayout.Height(34), GUILayout.MinWidth(110)))
                 Refresh();
 
+            GUILayout.Space(6);
+
+            // Bouton EXPORT JSON (teinte bleue) : dump complet de toutes les valeurs.
+            var exportStyle = new GUIStyle(buttonStyle);
+            exportStyle.normal.background = MakeRoundedTex(32, 32, new Color(0.40f, 0.70f, 1f, 0.18f), 5);
+            exportStyle.normal.textColor  = new Color(0.55f, 0.80f, 1f, 1f);
+            exportStyle.hover.textColor   = Color.white;
+            if (GUILayout.Button(
+                    new GUIContent("COPY JSON",
+                        "Copie dans le presse-papier un JSON complet (champs connus + extra + [EditValue]) " +
+                        "avec toutes les valeurs courantes. N'écrase pas Config.json."),
+                    exportStyle, GUILayout.Height(34), GUILayout.MinWidth(120)))
+                ExportFakeJson();
+
             GUILayout.FlexibleSpace();
 
             Color   saveColor = _isDirty ? colWarn : colAccent;
@@ -631,20 +676,24 @@ namespace VaroniaBackOffice
 
         // ─── Save ─────────────────────────────────────────────────────────────────
 
-        private void SaveToJson()
+        /// <summary>
+        /// Construit le JObject COMPLET de la config : champs connus (classe GameConfig) +
+        /// champs supplémentaires + valeurs des addons (dont [EditValue] via OnSave).
+        /// Partagé par la sauvegarde et l'export.
+        /// </summary>
+        private JObject BuildConfigJson()
         {
-            if (_configObj == null)
+            var jObj = new JObject();
+
+            if (_configObj != null && _knownFields != null)
             {
-                Debug.LogError("[GameConfig Editor] Rien à sauvegarder.");
-                return;
+                foreach (var field in _knownFields)
+                {
+                    var v = field.GetValue(_configObj);
+                    jObj[field.Name] = v != null ? JToken.FromObject(v) : JValue.CreateNull();
+                }
             }
 
-            var jObj = new JObject();
-            foreach (var field in _knownFields)
-            {
-                var v = field.GetValue(_configObj);
-                jObj[field.Name] = v != null ? JToken.FromObject(v) : JValue.CreateNull();
-            }
             foreach (var kvp in _extraFields)
                 jObj[kvp.Key] = kvp.Value;
 
@@ -654,6 +703,19 @@ namespace VaroniaBackOffice
                 catch (Exception e) { Debug.LogError($"[GameConfig Editor] Addon OnSave error: {e}"); }
             }
 
+            return jObj;
+        }
+
+        private void SaveToJson()
+        {
+            if (_configObj == null)
+            {
+                Debug.LogError("[GameConfig Editor] Rien à sauvegarder.");
+                return;
+            }
+
+            var jObj = BuildConfigJson();
+
             string dir = Path.GetDirectoryName(_savePath);
             if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
                 Directory.CreateDirectory(dir);
@@ -661,6 +723,26 @@ namespace VaroniaBackOffice
             File.WriteAllText(_savePath, jObj.ToString(Formatting.Indented));
             _isDirty = false;
             Debug.Log($"[GameConfig Editor] Sauvegardé → {_savePath}");
+        }
+
+        /// <summary>
+        /// Copie dans le presse-papier un JSON "modèle" contenant TOUTES les valeurs visibles
+        /// dans la fenêtre (champs connus + extra + [EditValue]). Indépendant du Config.json
+        /// réel — sert de template / référence complète à coller où on veut.
+        /// </summary>
+        private void ExportFakeJson()
+        {
+            if (_configObj == null)
+            {
+                Debug.LogWarning("[GameConfig Editor] Rien à copier (type 'GameConfig' introuvable).");
+                return;
+            }
+
+            var jObj = BuildConfigJson();
+            string json = jObj.ToString(Formatting.Indented);
+
+            EditorGUIUtility.systemCopyBuffer = json;
+            Debug.Log($"[GameConfig Editor] JSON complet ({jObj.Count} clés) copié dans le presse-papier.");
         }
 
         // ─── Helpers ──────────────────────────────────────────────────────────────
@@ -735,6 +817,10 @@ namespace VaroniaBackOffice
             public JObject Json => _w._loadedJson;
 
             public void SetDirty()                          => _w._isDirty = true;
+
+            /// <summary>À appeler après un (re)scan d'addon : recalcule les clés claimed et la
+            /// liste des champs supplémentaires (retire les doublons [EditValue]).</summary>
+            public void RequestExtraRecompute() { _w._needsExtraRecompute = true; _w.Repaint(); }
             public void Card(Action content, Color accent)  => _w.DrawCard(content, accent);
             public void SectionLabel(string text)           => _w.DrawSectionLabel(text);
             public void Divider()                           => _w.DrawDivider();

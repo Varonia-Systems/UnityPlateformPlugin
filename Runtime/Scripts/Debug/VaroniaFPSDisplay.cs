@@ -150,7 +150,8 @@ namespace VaroniaBackOffice
 #if VBO_UITOOLKIT_OVERLAYS
                 if (_avgLabel != null)     _avgLabel.style.display     = mini ? DisplayStyle.None : DisplayStyle.Flex;
                 if (_sessionLabel != null) _sessionLabel.style.display = mini ? DisplayStyle.None : DisplayStyle.Flex;
-                if (_timeLabel != null)    _timeLabel.style.display    = mini ? DisplayStyle.None : DisplayStyle.Flex;
+                // L'heure reste visible même en mode mini.
+                if (_timeLabel != null)    _timeLabel.style.display    = DisplayStyle.Flex;
 #else
                 _rtDirty = true;
 #endif
@@ -471,7 +472,7 @@ namespace VaroniaBackOffice
         {
             _totalH = Pad + SquaresH + SquaresGap + FpsH + GapFpsAvg + AvgH + SessionH + 2f
                     + DivH + GapDiv + TimeH + Pad;
-            _miniH  = MiniPad + MiniSquaresH + 2f + MiniFpsH + MiniPad;
+            _miniH  = MiniPad + MiniSquaresH + 2f + MiniFpsH + 2f + TimeH + MiniPad;
             _panelW = size.x;
         }
 
@@ -610,6 +611,9 @@ namespace VaroniaBackOffice
                 float yFps = panel.y + (MiniPad + MiniSquaresH + 2f) * scale;
                 _fpsStyle.normal.textColor = _cachedAccent;
                 GUI.Label(new Rect(x, yFps, w, MiniFpsH * scale), _cachedFps, _fpsStyle);
+
+                float yTime = yFps + (MiniFpsH + 2f) * scale;
+                GUI.Label(new Rect(x, yTime, w, TimeH * scale), _cachedTime, _timeStyle);
             }
             else
             {

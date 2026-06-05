@@ -59,6 +59,7 @@ public class DebugSceneMenu : MonoBehaviour
             new ShortcutEntry("F8",  "Cycle Overlays (0→1→2→0)",   new Color(0.92f, 0.92f, 0.95f, 1f)),
             new ShortcutEntry("F9",  "Toggle VR Overlay",          new Color(0.30f, 0.85f, 0.65f, 1f)),
             new ShortcutEntry("F10", "Cycle Debug: OFF/DEBUG/SUPER", new Color(0.30f, 0.85f, 0.65f, 1f)),
+            new ShortcutEntry("H",   "Toggle AI Hitbox Gizmos",     new Color(0.30f, 0.85f, 0.65f, 1f)),
         })
     };
 
@@ -67,6 +68,13 @@ public class DebugSceneMenu : MonoBehaviour
     private bool         _menuVisible = false;
     private List<string> _sceneNames  = new List<string>();
     private int          _currentPage = 0;
+
+    /// <summary>True tant que le menu F1 est affiché. Lu par d'autres systèmes (ex: gizmos de hitbox IA).</summary>
+    public static bool IsOpen { get; private set; }
+
+    /// <summary>Toggle des gizmos de hitbox des IA, dessinés EN JEU. Basculé par la touche H, mais
+    /// UNIQUEMENT quand le menu F1 est ouvert. Lu par BodyPartHitbox (package IA).</summary>
+    public static bool ShowHitboxDebug;
 
     // Advanced Change Scene (tableaux personnalisés avec vignettes, cf. Project Settings).
     private VaroniaRuntimeSettings _settings;
@@ -194,7 +202,12 @@ public class DebugSceneMenu : MonoBehaviour
         // F11 (maintien) : bascule la VR. Fonctionne en permanence, menu ouvert ou non.
         UpdateVrToggle();
 
+        IsOpen = _menuVisible; // expose l'état chaque frame pour les autres systèmes (gizmos hitbox IA)
+
         if (!_menuVisible) return;
+
+        // H : toggle les gizmos de hitbox des IA. Ne marche QUE menu F1 ouvert (on est après le return).
+        if (HPressed()) ShowHitboxDebug = !ShowHitboxDebug;
 
         HandleAdvancedTab(); // TAB : cycle board(s) ↔ liste classique
         HandlePagination();
@@ -379,6 +392,15 @@ public class DebugSceneMenu : MonoBehaviour
 #endif
     }
 
+    private static bool HPressed()
+    {
+#if ENABLE_INPUT_SYSTEM
+        return Keyboard.current != null && Keyboard.current.hKey.wasPressedThisFrame;
+#else
+        return Input.GetKeyDown(KeyCode.H);
+#endif
+    }
+
     private void HandlePagination()
     {
         int maxPages = Mathf.Max(1, Mathf.CeilToInt((float)_sceneNames.Count / scenesPerPage));
@@ -475,6 +497,34 @@ public class DebugSceneMenu : MonoBehaviour
             EnsureStyles(scale);
             DrawVrToggleOverlay(scale);
         }
+
+        // Indicateur "AI HITBOX DEBUG ON" — visible EN PERMANENCE tant que le mode est actif
+        // (même menu F1 fermé) → feedback clair de l'état.
+        if (ShowHitboxDebug)
+        {
+            EnsureStyles(scale);
+            DrawHitboxDebugIndicator(scale);
+        }
+    }
+
+    private void DrawHitboxDebugIndicator(float scale)
+    {
+        string txt = "● AI HITBOX DEBUG : ON   (F1 + H)";
+        Vector2 sz = _overlayTitleStyle.CalcSize(new GUIContent(txt));
+        float pad = 10f * scale;
+        float w   = sz.x + pad * 2f;
+        float h   = sz.y + pad;
+        Rect box  = new Rect((Screen.width - w) * 0.5f, 12f * scale, w, h);
+
+        GUI.DrawTexture(box, _bgTex);
+        GUI.color = ColGood;
+        GUI.DrawTexture(new Rect(box.x, box.y, 3f * scale, box.height), _whiteTex);
+        GUI.color = Color.white;
+
+        Color saved = _overlayTitleStyle.normal.textColor;
+        _overlayTitleStyle.normal.textColor = ColGood;
+        GUI.Label(box, txt, _overlayTitleStyle);
+        _overlayTitleStyle.normal.textColor = saved;
     }
 
     private void DrawMenu(float scale)
@@ -608,7 +658,17 @@ public class DebugSceneMenu : MonoBehaviour
             {
                 _keyStyle.normal.textColor = e.keyColor;
                 GUI.Label(new Rect(lx,    y, keyW,  rowH), e.key,  _keyStyle);
-                GUI.Label(new Rect(descX, y, descW, rowH), e.desc, _descStyle);
+
+                // La ligne "H" affiche son état courant (ON/OFF) pour feedback immédiat.
+                string desc = e.desc;
+                if (e.key == "H")
+                {
+                    bool on = ShowHitboxDebug;
+                    _descStyle.normal.textColor = on ? ColGood : ColMuted;
+                    desc += on ? "   ● ON" : "   ○ OFF";
+                }
+                GUI.Label(new Rect(descX, y, descW, rowH), desc, _descStyle);
+                _descStyle.normal.textColor = ColMuted; // restore
                 y += rowH;
             }
         }
