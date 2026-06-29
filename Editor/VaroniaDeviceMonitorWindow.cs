@@ -1,3 +1,6 @@
+// Cette fenetre utilise ProgressBar (UI Toolkit) qui n'est disponible cote runtime/editor
+// que sur Unity 6+. On compile donc toute la classe (et son menu) uniquement sur Unity 6 ou plus.
+#if UNITY_6000_0_OR_NEWER
 // Fenetre Editor (UI Toolkit) : monitore le casque connecte en ADB et ses infos.
 //   - Identite : model, serial, version OS
 //   - Etat : batterie (niveau, temperature, charge), stockage
@@ -496,3 +499,4 @@ namespace VaroniaBackOffice.EditorTools
         }
     }
 }
+#endif // UNITY_6000_0_OR_NEWER
