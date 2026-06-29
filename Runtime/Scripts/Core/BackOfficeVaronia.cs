@@ -81,6 +81,21 @@ namespace VaroniaBackOffice
         private bool _showFdpDebug = false;
         private string _fdpPathFound = "";
 
+        // Alerte "Controller ID not found" : une arme (legacy ou Devices) n'a pas d'enum Controller valide.
+        private bool _showControllerWarning = false;
+        private string _controllerWarningMsg = "";
+
+        // Surveillance runtime du DeviceMode : si la config change (ex. on devient spectateur),
+        // on lève OnMovieChanged automatiquement pour que tous les overlays se réévaluent.
+        private DeviceMode? _lastDeviceMode = null;
+
+        // Merge FDP : ObjectCreationHandling.Replace → pour les listes/tableaux, le FDP
+        // REMPLACE la liste existante au lieu d'y ajouter des éléments.
+        private static readonly JsonSerializerSettings _fdpMergeSettings = new JsonSerializerSettings
+        {
+            ObjectCreationHandling = ObjectCreationHandling.Replace,
+        };
+
         // ── Win32 : Minimize window ───────────────────────────────────────────────
 #if UNITY_STANDALONE_WIN || UNITY_EDITOR_WIN
         [DllImport("user32.dll")]
@@ -156,6 +171,7 @@ namespace VaroniaBackOffice
         private void Update()
         {
             CheckMainCamera();
+            CheckDeviceModeChanged();
 
             // Freeze detection logic
             float currentTime = Time.realtimeSinceStartup;
@@ -213,6 +229,21 @@ namespace VaroniaBackOffice
 #endif
         }
 
+        /// <summary>
+        /// Détecte un changement de <see cref="GlobalConfig.DeviceMode"/> à l'exécution
+        /// (ex. on passe joueur → spectateur) et lève <see cref="OnMovieChanged"/> pour que
+        /// les overlays (info display, charts latence, FPS…) se réévaluent et se masquent.
+        /// </summary>
+        private void CheckDeviceModeChanged()
+        {
+            if (config == null) return;
+            if (_lastDeviceMode != config.DeviceMode)
+            {
+                _lastDeviceMode = config.DeviceMode;
+                RaiseMovieChanged();
+            }
+        }
+
         private void CheckMainCamera()
         {
             if (_mainCamera == null)
@@ -252,47 +283,67 @@ namespace VaroniaBackOffice
 
         private void OnGUI()
         {
-            if (!_showFdpDebug) return;
+            if (!_showFdpDebug && !_showControllerWarning) return;
 
-            // Theme colors (from WorldSpaceDebugUI)
-            Color colBg = new Color(0.11f, 0.11f, 0.14f, 0.92f);
-            Color colGood = new Color(0.30f, 0.85f, 0.65f, 1f);
-            Color colValue = new Color(0.92f, 0.92f, 0.95f, 1f);
-
-            float width = 500f;
-            float height = 80f;
-            float x = (Screen.width - width) / 2f;
             float y = 50f;
 
-            // Style for background
+            if (_showFdpDebug)
+                DrawBanner(ref y,
+                    "⚠  FICHIER FDP (OVERRIDE) DÉTECTÉ & CHARGÉ",
+                    _fdpPathFound,
+                    $"Closing in {_fdpDebugTimer:F1}s...",
+                    new Color(1f, 0.60f, 0.10f, 1f)); // orange
+
+            if (_showControllerWarning)
+                DrawBanner(ref y,
+                    "⛔  CONTROLLER ID NOT FOUND",
+                    _controllerWarningMsg,
+                    "Vérifie le champ Controller (enum) de l'arme dans GlobalConfig.",
+                    new Color(1f, 0.30f, 0.30f, 1f)); // rouge
+        }
+
+        /// <summary>Dessine une bannière d'alerte centrée en haut, et avance <paramref name="y"/> pour empiler.</summary>
+        private void DrawBanner(ref float y, string title, string line1, string line2, Color titleColor)
+        {
+            Color colBg    = new Color(0.11f, 0.11f, 0.14f, 0.92f);
+            Color colValue = new Color(0.92f, 0.92f, 0.95f, 1f);
+
+            float width  = 560f;
+            float height = 80f;
+            float x = (Screen.width - width) / 2f;
+
             GUIStyle bgStyle = new GUIStyle(GUI.skin.box);
             Texture2D bgTex = new Texture2D(1, 1);
             bgTex.SetPixel(0, 0, colBg);
             bgTex.Apply();
             bgStyle.normal.background = bgTex;
 
-            // Style for label
-            GUIStyle labelStyle = new GUIStyle(GUI.skin.label);
-            labelStyle.alignment = TextAnchor.MiddleCenter;
-            labelStyle.fontSize = 16;
-            labelStyle.fontStyle = FontStyle.Bold;
-            labelStyle.normal.textColor = colGood;
+            GUIStyle labelStyle = new GUIStyle(GUI.skin.label)
+            {
+                alignment = TextAnchor.MiddleCenter,
+                fontSize = 16,
+                fontStyle = FontStyle.Bold,
+                wordWrap = true,
+            };
+            labelStyle.normal.textColor = titleColor;
 
-            // Style for path
-            GUIStyle pathStyle = new GUIStyle(GUI.skin.label);
-            pathStyle.alignment = TextAnchor.MiddleCenter;
-            pathStyle.fontSize = 12;
+            GUIStyle pathStyle = new GUIStyle(GUI.skin.label)
+            {
+                alignment = TextAnchor.MiddleCenter,
+                fontSize = 12,
+                wordWrap = true,
+            };
             pathStyle.normal.textColor = colValue;
 
             GUILayout.BeginArea(new Rect(x, y, width, height), bgStyle);
             GUILayout.FlexibleSpace();
-            
-            GUILayout.Label("OVERRIDE FILE DETECTED & LOADED", labelStyle);
-            GUILayout.Label(_fdpPathFound, pathStyle);
-
-            GUILayout.Label($"Closing in {_fdpDebugTimer:F1}s...", pathStyle);
+            GUILayout.Label(title, labelStyle);
+            if (!string.IsNullOrEmpty(line1)) GUILayout.Label(line1, pathStyle);
+            if (!string.IsNullOrEmpty(line2)) GUILayout.Label(line2, pathStyle);
             GUILayout.FlexibleSpace();
             GUILayout.EndArea();
+
+            y += height + 8f;
         }
 
         /// <summary>
@@ -383,7 +434,7 @@ namespace VaroniaBackOffice
                 try
                 {
                     string fdpContent = File.ReadAllText(gameConfigFdpPath);
-                    JsonConvert.PopulateObject(fdpContent, gameConfig);
+                    JsonConvert.PopulateObject(fdpContent, gameConfig, _fdpMergeSettings);
                     
                     // On merge aussi dans les extra fields pour la lecture à la volée
                     var fdpExtra = JsonConvert.DeserializeObject<Dictionary<string, object>>(fdpContent);
@@ -395,7 +446,7 @@ namespace VaroniaBackOffice
                         }
                     }
                     
-                    Debug.Log($"[BackOfficeVaronia] GameConfig FDP overrides applied from {gameConfigFdpPath}");
+                    Debug.LogWarning($"[BackOfficeVaronia] ⚠ Fichier FDP (override) GameConfig détecté et appliqué : {gameConfigFdpPath}");
                 }
                 catch (Exception e)
                 {
@@ -418,8 +469,8 @@ namespace VaroniaBackOffice
                 try
                 {
                     string fdpContent = File.ReadAllText(fdpPath);
-                    JsonConvert.PopulateObject(fdpContent, config);
-                    Debug.Log($"[BackOfficeVaronia] FDP overrides applied from {fdpPath}");
+                    JsonConvert.PopulateObject(fdpContent, config, _fdpMergeSettings);
+                    Debug.LogWarning($"[BackOfficeVaronia] ⚠ Fichier FDP (override) GlobalConfig détecté et appliqué : {fdpPath}");
                 }
                 catch (Exception e)
                 {
@@ -459,8 +510,53 @@ namespace VaroniaBackOffice
             }
             catch { extraFields = new Dictionary<string, object>(); }
 
+            ValidateControllers();
+
             OnConfigLoaded?.Invoke();
         }
+
+        /// <summary>
+        /// Vérifie que chaque arme configurée possède un enum <see cref="Controller"/> valide.
+        /// - Mode legacy (ForceLegacyController OU liste Devices vide) → vérifie le Controller mono-arme.
+        /// - Mode multi-arme → vérifie le Controller de chaque entrée de <see cref="GlobalConfig.Devices"/>.
+        /// Si une arme n'a pas d'enum valide, affiche l'alerte "Controller ID not found".
+        /// </summary>
+        private void ValidateControllers()
+        {
+            _showControllerWarning = false;
+            _controllerWarningMsg = "";
+            if (config == null) return;
+
+            var missing = new List<string>();
+            bool legacyActive = config.ForceLegacyController || config.Devices == null || config.Devices.Count == 0;
+
+            if (legacyActive)
+            {
+                if (HasNoControllerEnum(config.Controller))
+                    missing.Add("Legacy Controller");
+            }
+
+            if (!config.ForceLegacyController && config.Devices != null)
+            {
+                for (int i = 0; i < config.Devices.Count; i++)
+                {
+                    var d = config.Devices[i];
+                    if (d != null && HasNoControllerEnum(d.Controller))
+                        missing.Add(string.IsNullOrEmpty(d.SerialNumber) ? $"Device #{i}" : $"Device #{i} ({d.SerialNumber})");
+                }
+            }
+
+            if (missing.Count > 0)
+            {
+                _controllerWarningMsg = string.Join("  •  ", missing);
+                _showControllerWarning = true;
+                Debug.LogError("[BackOfficeVaronia] Controller ID not found — " + _controllerWarningMsg);
+            }
+        }
+
+        /// <summary>Vrai si la valeur n'est pas un enum Controller valide (Unknown ou valeur non définie).</summary>
+        private static bool HasNoControllerEnum(Controller c)
+            => c == Controller.Unknown || !System.Enum.IsDefined(typeof(Controller), c);
 
         /// <summary>
         /// Serializes the current config object and saves it to the persistent path.

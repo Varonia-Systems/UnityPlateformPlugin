@@ -4,6 +4,7 @@
 // IMGUI par défaut, UI Toolkit avec define VBO_UITOOLKIT_OVERLAYS.
 // Toggle : Project Settings → Varonia Back Office → Debug Overlays Rendering.
 
+using System.Collections.Generic;
 using UnityEngine;
 using VBO_Ultimate.Runtime.Scripts.Input;
 #if ENABLE_INPUT_SYSTEM
@@ -17,12 +18,10 @@ namespace VaroniaBackOffice
 {
     public class DebugInputOverlay : MonoBehaviour
     {
-        public enum DisplayCorner { TopLeft, TopRight, BottomLeft, BottomRight }
-
-        [Header("Display")]
-        [SerializeField] private DisplayCorner corner = DisplayCorner.TopRight;
-        [SerializeField] private Vector2 margin = new Vector2(12f, 12f);
-        [SerializeField] private Vector2 size   = new Vector2(160f, 160f);
+        // Panneau toujours ancré en bas à droite ; largeur fixe, hauteur dynamique (UITK).
+        private const float PanelWidth      = 160f; // largeur (x) fixe
+        private const float ScreenMargin    = 12f;  // marge depuis le coin bas-droit
+        private const float ImguiSlotHeight = 160f; // IMGUI : hauteur de slot fixe (pas de hauteur dynamique)
 
         [Header("UI Scale")]
         public float scaleFactor = 1f;
@@ -56,7 +55,6 @@ namespace VaroniaBackOffice
             if (tracking != null)
             {
                 _weaponIndex   = tracking.weaponIndex;
-                margin.y       = margin.y + _weaponIndex * (size.y);
                 _indexResolved = true;
             }
             else
@@ -83,10 +81,9 @@ namespace VaroniaBackOffice
             if (_mqttInput == null || !_mqttInput.Resolved) return;
 
             _weaponIndex   = _mqttInput.WeaponIndex;
-            margin.y       = margin.y + _weaponIndex * (size.y);
             _indexResolved = true;
 #if VBO_UITOOLKIT_OVERLAYS
-            PositionPanel_UITK(); // la marge a changé → on repositionne le panneau
+            ReflowUITK(); // l'index est connu → on recalcule l'empilement de tous les panneaux
 #endif
         }
 
@@ -94,6 +91,7 @@ namespace VaroniaBackOffice
         {
             BackOfficeVaronia.OnMovieChanged += OnMovieChanged;
 #if VBO_UITOOLKIT_OVERLAYS
+            if (!s_uitkInstances.Contains(this)) s_uitkInstances.Add(this);
             BuildOverlay_UITK();
 #endif
         }
@@ -102,6 +100,8 @@ namespace VaroniaBackOffice
         {
             BackOfficeVaronia.OnMovieChanged -= OnMovieChanged;
 #if VBO_UITOOLKIT_OVERLAYS
+            s_uitkInstances.Remove(this);
+            ReflowUITK(); // un panneau part → on recompacte les autres
             if (_panelSettings != null)
             {
                 if (_panelSettings.themeStyleSheet != null) Destroy(_panelSettings.themeStyleSheet);
@@ -186,6 +186,11 @@ namespace VaroniaBackOffice
         private UIDocument _doc;
         private PanelSettings _panelSettings;
         private VisualElement _root, _panel, _accent;
+
+        // Empilement automatique de plusieurs panneaux : registre + hauteur mesurée.
+        private static readonly List<DebugInputOverlay> s_uitkInstances = new List<DebugInputOverlay>();
+        private const float StackGap   = 0f;   // espace entre deux panneaux empilés (0 = collés)
+        private const float StartY     = 150f; // décalage de départ depuis le bas (place pour un panneau existant)
         private Label _titleLabel, _lastInputValue;
         private VisualElement[] _btnEls = new VisualElement[4];
         private Label[] _btnLabels = new Label[4];
@@ -206,6 +211,9 @@ namespace VaroniaBackOffice
         private void UpdateUITK()
         {
             if (_panel == null) return;
+
+            // Repositionne chaque frame selon la hauteur live des panneaux d'index inférieur.
+            PositionPanel_UITK();
 
             // Title — change rarement, compare strings ref-first
             string title = TitleText();
@@ -319,8 +327,8 @@ namespace VaroniaBackOffice
                 style =
                 {
                     position = Position.Absolute,
-                    width = size.x,
-                    minHeight = size.y,
+                    width = PanelWidth,
+                    // pas de minHeight → le panneau se dimensionne à son contenu (dynamique).
                     flexDirection = FlexDirection.Column,
                     backgroundColor = ColBg,
                     paddingLeft = 10, paddingRight = 10, paddingTop = 6, paddingBottom = 6,
@@ -429,27 +437,32 @@ namespace VaroniaBackOffice
         private void PositionPanel_UITK()
         {
             if (_panel == null) return;
-            float mx = margin.x, my = margin.y;
-            _panel.style.width = size.x * scaleFactor;
-            switch (corner)
+
+            // Empilement "premier arrivé, premier servi" : décalage = somme des hauteurs
+            // RÉELLES (live) des panneaux enregistrés AVANT celui-ci (ordre d'arrivée).
+            int myIdx = s_uitkInstances.IndexOf(this);
+            float offset = 0f;
+            for (int i = 0; i < myIdx; i++)
             {
-                case DisplayCorner.TopLeft:
-                    _panel.style.left = mx; _panel.style.top = my;
-                    _panel.style.right = StyleKeyword.Auto; _panel.style.bottom = StyleKeyword.Auto;
-                    break;
-                case DisplayCorner.TopRight:
-                    _panel.style.right = mx; _panel.style.top = my;
-                    _panel.style.left = StyleKeyword.Auto; _panel.style.bottom = StyleKeyword.Auto;
-                    break;
-                case DisplayCorner.BottomLeft:
-                    _panel.style.left = mx; _panel.style.bottom = my;
-                    _panel.style.right = StyleKeyword.Auto; _panel.style.top = StyleKeyword.Auto;
-                    break;
-                default:
-                    _panel.style.right = mx; _panel.style.bottom = my;
-                    _panel.style.left = StyleKeyword.Auto; _panel.style.top = StyleKeyword.Auto;
-                    break;
+                var o = s_uitkInstances[i];
+                if (o._panel == null) continue;
+                float oh = o._panel.resolvedStyle.height;
+                if (!float.IsNaN(oh) && oh > 0f) offset += oh + StackGap;
             }
+
+            // Toujours ancré en bas à droite ; empilement vers le haut, départ à StartY.
+            _panel.style.width  = PanelWidth * scaleFactor;
+            _panel.style.right  = ScreenMargin;
+            _panel.style.bottom = StartY + offset;
+            _panel.style.left   = StyleKeyword.Auto;
+            _panel.style.top    = StyleKeyword.Auto;
+        }
+
+        // Repositionne tous les panneaux (ex. quand un panneau part).
+        private static void ReflowUITK()
+        {
+            for (int i = 0; i < s_uitkInstances.Count; i++)
+                s_uitkInstances[i].PositionPanel_UITK();
         }
 #endif // VBO_UITOOLKIT_OVERLAYS
 
@@ -552,16 +565,11 @@ namespace VaroniaBackOffice
 
         private Rect GetPanelRect(float scale)
         {
-            float w = size.x * scale, h = size.y * scale;
-            float x, y;
-            float mx = margin.x * scale, my = margin.y * scale;
-            switch (corner)
-            {
-                case DisplayCorner.TopLeft:     x = mx; y = my; break;
-                case DisplayCorner.TopRight:    x = Screen.width - w - mx; y = my; break;
-                case DisplayCorner.BottomLeft:  x = mx; y = Screen.height - h - my; break;
-                default:                        x = Screen.width - w - mx; y = Screen.height - h - my; break;
-            }
+            // Toujours bas-droite ; empilement par slot fixe vers le haut.
+            float w = PanelWidth * scale, h = ImguiSlotHeight * scale;
+            float m = ScreenMargin * scale;
+            float x = Screen.width  - w - m;
+            float y = Screen.height - h - m - _weaponIndex * h;
             return new Rect(x, y, w, h);
         }
 

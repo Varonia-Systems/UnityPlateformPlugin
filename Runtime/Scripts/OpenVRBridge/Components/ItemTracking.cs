@@ -217,17 +217,24 @@ namespace VaroniaBackOffice
         void UpdateSteamVR()
         {
 #if STEAMVR_ENABLED
-            if (vr == null)
-                vr = SteamVRBridge.GetSystem();
+            if (_dead) return;
+
+            // Poll PARTAGÉ : une seule requête de poses par frame pour TOUS les ItemTracking
+            // (au lieu d'une par instance). null = pas de session VR → on ne martèle pas.
+            _poses = SteamVRBridge.GetPosesThisFrame();
+            if (_poses == null)
+            {
+                SetTrackingState(false);
+                return;
+            }
+
+            // vr nécessaire à FindTracker (classe device / serial). GetSystem est caché → quasi gratuit.
+            if (vr == null) vr = SteamVRBridge.GetSystem();
             if (vr == null)
             {
                 SetTrackingState(false);
                 return;
             }
-            if (_dead) return;
-
-            vr.GetDeviceToAbsoluteTrackingPose(
-                ETrackingUniverseOrigin.TrackingUniverseStanding, 0, _poses);
 
             if (autoFind)
                 FindTracker();
@@ -245,11 +252,16 @@ namespace VaroniaBackOffice
         {
             if (vr == null || _dead) return;
 
+            // Déjà verrouillé sur un device avec une pose valide : rien à refaire cette frame.
+            // Le serial a déjà été validé lors du find initial (cf. boucle ci-dessous), donc on
+            // sort AUSSI avec useSerialFilter actif → évite un re-scan des 64 devices + des allocs
+            // GetStringTrackedDeviceProperty à chaque frame. Si la pose se perd, la condition
+            // tombe et on relance la recherche.
             if (found && foundIndex != -1
                 && (uint)foundIndex < 64
                 && _poses[foundIndex].bPoseIsValid)
             {
-                if (!useSerialFilter) return;
+                return;
             }
 
             for (uint i = 0; i < 64; i++)

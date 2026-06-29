@@ -60,6 +60,7 @@ namespace VaroniaBackOffice
         private int     _sampleIdx;
         private int     _sampleFilled;
         private float   _fpsTimer;
+        private float   _emaDt = -1f;   // delta time lissé (EMA), pour un FPS stable façon Unity Stats
         private int     _fps, _avg, _sessionAvg;
         private double  _sessionDtSum;
         private long    _sessionFrameCount;
@@ -148,10 +149,16 @@ namespace VaroniaBackOffice
                 if (mini == value) return;
                 mini = value;
 #if VBO_UITOOLKIT_OVERLAYS
-                if (_avgLabel != null)     _avgLabel.style.display     = mini ? DisplayStyle.None : DisplayStyle.Flex;
-                if (_sessionLabel != null) _sessionLabel.style.display = mini ? DisplayStyle.None : DisplayStyle.Flex;
+                // Mode mini (spectateur) : on ne garde QUE le compteur FPS + l'heure.
+                var hideInMini = mini ? DisplayStyle.None : DisplayStyle.Flex;
+                if (_avgLabel != null)         _avgLabel.style.display         = hideInMini;
+                if (_sessionLabel != null)     _sessionLabel.style.display     = hideInMini;
+                if (_squaresContainer != null) _squaresContainer.style.display = hideInMini;
+                if (_divider != null)          _divider.style.display          = hideInMini;
                 // L'heure reste visible même en mode mini.
                 if (_timeLabel != null)    _timeLabel.style.display    = DisplayStyle.Flex;
+                // Panel compact en mini : laisse la hauteur s'ajuster au contenu (FPS + heure).
+                if (_panel != null)        _panel.style.minHeight      = mini ? 0 : 120;
 #else
                 _rtDirty = true;
 #endif
@@ -175,6 +182,11 @@ namespace VaroniaBackOffice
             {
                 _sessionDtSum += dt;
                 _sessionFrameCount++;
+
+                // Lissage exponentiel du delta time (comme l'overlay Stats d'Unity) :
+                // évite que le compteur saute à chaque frame. Constante de temps ~0.5s.
+                if (_emaDt < 0f) _emaDt = dt;
+                else _emaDt += (dt - _emaDt) * Mathf.Clamp01(dt / 0.5f);
             }
 
             // Display tick (10 Hz par défaut)
@@ -182,7 +194,7 @@ namespace VaroniaBackOffice
             if (_fpsTimer >= updateInterval)
             {
                 _fpsTimer = 0f;
-                _fps = validFrame ? Mathf.RoundToInt(1f / dt) : _fps;
+                _fps = _emaDt > 0f ? Mathf.RoundToInt(1f / _emaDt) : _fps;
 
                 float sum = 0f;
                 int count = Mathf.Min(_sampleFilled, sampleCount);
@@ -291,7 +303,7 @@ namespace VaroniaBackOffice
 #if VBO_UITOOLKIT_OVERLAYS
         private UIDocument _doc;
         private PanelSettings _panelSettings;
-        private VisualElement _root, _panel, _accent, _squaresContainer;
+        private VisualElement _root, _panel, _accent, _squaresContainer, _divider;
         private VisualElement[] _squareEls;
         private Label _fpsLabel, _avgLabel, _sessionLabel, _timeLabel;
         private Font _runtimeFont;
@@ -382,12 +394,12 @@ namespace VaroniaBackOffice
             _sessionLabel.style.height = 18; _sessionLabel.style.marginBottom = 4;
             _panel.Add(_sessionLabel);
 
-            var div = new VisualElement
+            _divider = new VisualElement
             {
                 pickingMode = PickingMode.Ignore,
                 style = { height = 1, backgroundColor = ColDivider, marginTop = 4, marginBottom = 4 }
             };
-            _panel.Add(div);
+            _panel.Add(_divider);
 
             _timeLabel = MakeLabel_UITK("00:00:00", 10, FontStyle.Bold, ColMuted, TextAnchor.MiddleRight);
             _timeLabel.style.height = 18; _timeLabel.style.marginTop = 4;
@@ -472,7 +484,8 @@ namespace VaroniaBackOffice
         {
             _totalH = Pad + SquaresH + SquaresGap + FpsH + GapFpsAvg + AvgH + SessionH + 2f
                     + DivH + GapDiv + TimeH + Pad;
-            _miniH  = MiniPad + MiniSquaresH + 2f + MiniFpsH + 2f + TimeH + MiniPad;
+            // Mini (spectateur) : seulement le compteur FPS + l'heure, pas de graphe.
+            _miniH  = MiniPad + MiniFpsH + 2f + TimeH + MiniPad;
             _panelW = size.x;
         }
 
@@ -539,7 +552,7 @@ namespace VaroniaBackOffice
 
             if (mini)
             {
-                RenderSquaresBatched_IMGUI(12f * scale, W - 12f * scale, MiniPad * scale, MiniSquaresH * scale);
+                // Pas de graphe en mini : seuls le fond + l'accent sont dessinés ici.
             }
             else
             {
@@ -608,7 +621,7 @@ namespace VaroniaBackOffice
 
             if (mini)
             {
-                float yFps = panel.y + (MiniPad + MiniSquaresH + 2f) * scale;
+                float yFps = panel.y + MiniPad * scale;
                 _fpsStyle.normal.textColor = _cachedAccent;
                 GUI.Label(new Rect(x, yFps, w, MiniFpsH * scale), _cachedFps, _fpsStyle);
 

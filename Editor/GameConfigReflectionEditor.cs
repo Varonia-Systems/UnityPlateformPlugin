@@ -21,6 +21,10 @@ namespace VaroniaBackOffice
         // Extra fields (JSON keys not present in the class)
         private readonly Dictionary<string, JToken> _extraFields = new Dictionary<string, JToken>();
 
+        // Flags "istablet" par champ — persistés dans le projet (ProjectSettings, versionnable).
+        // Un champ marqué tablet va dans COPY TABLET ; sinon dans COPY SCENE.
+        private readonly HashSet<string> _tabletKeys = new HashSet<string>();
+
         // Parsed config JSON from the last refresh (null if no file). Exposed to addons.
         private JObject _loadedJson;
 
@@ -287,7 +291,84 @@ namespace VaroniaBackOffice
 
             NotifyAddonsLoad();
             LoadExtraFields();
+            LoadTabletKeys();
             _isDirty = false;
+        }
+
+        // ─── Tablet flags (persistés dans le projet) ───────────────────────────────
+
+        // Fichier versionnable, à côté du projet (pas dans Assets, pas per-machine comme EditorPrefs).
+        private static string TabletKeysPath =>
+            Path.GetFullPath(Path.Combine(Application.dataPath, "..", "ProjectSettings", "VBO_GameConfigTabletKeys.json"));
+
+        private void LoadTabletKeys()
+        {
+            _tabletKeys.Clear();
+            try
+            {
+                string p = TabletKeysPath;
+                if (File.Exists(p))
+                    foreach (var t in JArray.Parse(File.ReadAllText(p)))
+                        _tabletKeys.Add(t.ToString());
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning($"[GameConfig Editor] Lecture tablet keys impossible : {e.Message}");
+            }
+        }
+
+        private void SaveTabletKeys()
+        {
+            try
+            {
+                var arr = new JArray();
+                foreach (var k in _tabletKeys) arr.Add(k);
+                File.WriteAllText(TabletKeysPath, arr.ToString(Formatting.Indented));
+            }
+            catch (Exception e)
+            {
+                Debug.LogError($"[GameConfig Editor] Écriture tablet keys impossible : {e.Message}");
+            }
+        }
+
+        private void SetTablet(string key, bool isTablet)
+        {
+            if (isTablet) _tabletKeys.Add(key);
+            else          _tabletKeys.Remove(key);
+            SaveTabletKeys();
+        }
+
+        // Rouge utilisé pour les cases "istablet".
+        static readonly Color colTabletRed = new Color(1f, 0.35f, 0.35f, 1f);
+
+        // Petite case "istablet" (rouge) devant un champ.
+        private void DrawTabletToggle(string key)
+        {
+            bool was = _tabletKeys.Contains(key);
+            var prevBg = GUI.backgroundColor;
+            GUI.backgroundColor = colTabletRed; // teinte la case en rouge
+            bool now = EditorGUILayout.Toggle(
+                new GUIContent("", "istablet : inclus dans COPY TABLET (sinon COPY SCENE)"),
+                was, GUILayout.Width(16));
+            GUI.backgroundColor = prevBg;
+            if (now != was) SetTablet(key, now);
+        }
+
+        // Légende expliquant la case rouge.
+        private void DrawTabletLegend()
+        {
+            EditorGUILayout.BeginHorizontal();
+            var prevBg = GUI.backgroundColor;
+            GUI.backgroundColor = colTabletRed;
+            using (new EditorGUI.DisabledScope(true))
+                EditorGUILayout.Toggle(true, GUILayout.Width(16));
+            GUI.backgroundColor = prevBg;
+
+            var legend = new GUIStyle(fieldLabelStyle) { fontSize = 10, wordWrap = true };
+            legend.normal.textColor = colTabletRed;
+            GUILayout.Label("case rouge = champ « Tablet » → exporté par COPY TABLET (sinon COPY SCENE)", legend);
+            EditorGUILayout.EndHorizontal();
+            EditorGUILayout.Space(4);
         }
 
         private void NotifyAddonsLoad()
@@ -353,7 +434,11 @@ namespace VaroniaBackOffice
             // "claimed" et ne doivent plus apparaître dans la carte "champs supplémentaires".
             // Fait tout en haut d'OnGUI → _extraFields a le MÊME contenu sur les passes Layout
             // et Repaint de la frame (sinon IMGUI râle sur le nombre de contrôles).
-            if (_needsExtraRecompute)
+            // Uniquement sur l'événement Layout : sinon un recompute déclenché PENDANT la passe
+            // Layout (par l'addon) se rejouerait sur la passe Repaint → _extraFields changerait
+            // en cours de frame → "Mismatched LayoutGroup". En se limitant à Layout, les deux
+            // passes d'une même frame voient le même contenu.
+            if (_needsExtraRecompute && Event.current.type == EventType.Layout)
             {
                 _needsExtraRecompute = false;
                 RecomputeClaimedKeysAndExtras();
@@ -421,6 +506,7 @@ namespace VaroniaBackOffice
                 EditorGUILayout.Space(4);
                 DrawDivider();
                 EditorGUILayout.Space(6);
+                DrawTabletLegend();
                 DrawKnownFields();
             }, colAccent);
 
@@ -483,11 +569,12 @@ namespace VaroniaBackOffice
             var value = field.GetValue(_configObj);
             var type  = field.FieldType;
 
+            EditorGUILayout.BeginHorizontal();
+            DrawTabletToggle(field.Name);
+            GUILayout.Label(new GUIContent(field.Name, GetTooltip(field)), fieldLabelStyle, GUILayout.Width(134));
+
             EditorGUI.BeginChangeCheck();
             object newValue;
-
-            EditorGUILayout.BeginHorizontal();
-            GUILayout.Label(new GUIContent(field.Name, GetTooltip(field)), fieldLabelStyle, GUILayout.Width(150));
 
             if (type == typeof(string))
                 newValue = EditorGUILayout.TextField((string)value ?? "");
@@ -531,9 +618,10 @@ namespace VaroniaBackOffice
             foreach (var kvp in _extraFields)
             {
                 EditorGUILayout.BeginHorizontal();
-                GUILayout.Label($"[{kvp.Value.Type}]", badgeStyle, GUILayout.Width(60));
+                DrawTabletToggle(kvp.Key);
+                GUILayout.Label($"[{kvp.Value.Type}]", badgeStyle, GUILayout.Width(54));
                 // Largeur élargie + tooltip = nom complet (les clés longues ne sont plus coupées).
-                GUILayout.Label(new GUIContent(kvp.Key, kvp.Key), fieldLabelStyle, GUILayout.Width(200));
+                GUILayout.Label(new GUIContent(kvp.Key, kvp.Key), fieldLabelStyle, GUILayout.Width(190));
 
                 JToken edited = DrawJTokenEditor(kvp.Value);
                 if (edited.ToString() != kvp.Value.ToString())
@@ -629,25 +717,45 @@ namespace VaroniaBackOffice
 
         private void DrawFooter()
         {
+            // ── Ligne COPY : JSON complet / SCENE (non-tablet) / TABLET ──
+            GUIStyle CopyStyle(Color c)
+            {
+                var s = new GUIStyle(buttonStyle);
+                s.normal.background = MakeRoundedTex(32, 32, new Color(c.r, c.g, c.b, 0.18f), 5);
+                s.normal.textColor  = c;
+                s.hover.textColor   = Color.white;
+                return s;
+            }
+
+            EditorGUILayout.BeginHorizontal();
+            GUILayout.Space(16);
+
+            if (GUILayout.Button(new GUIContent("COPY JSON",
+                    "JSON complet (tous les champs : connus + extra + [EditValue])."),
+                    CopyStyle(new Color(0.55f, 0.80f, 1f, 1f)), GUILayout.Height(30)))
+                ExportFakeJson();
+            GUILayout.Space(4);
+            if (GUILayout.Button(new GUIContent("COPY SCENE",
+                    "JSON des champs NON marqués 'tablet'."),
+                    CopyStyle(colAccent), GUILayout.Height(30)))
+                ExportSubsetJson(tablet: false);
+            GUILayout.Space(4);
+            if (GUILayout.Button(new GUIContent("COPY TABLET",
+                    "JSON des champs marqués 'tablet' (case devant le champ)."),
+                    CopyStyle(colWarn), GUILayout.Height(30)))
+                ExportSubsetJson(tablet: true);
+
+            GUILayout.Space(16);
+            EditorGUILayout.EndHorizontal();
+
+            EditorGUILayout.Space(4);
+
+            // ── Ligne action : Rafraîchir / Sauvegarder ──
             EditorGUILayout.BeginHorizontal();
             GUILayout.Space(16);
 
             if (GUILayout.Button("RAFRAÎCHIR", buttonStyle, GUILayout.Height(34), GUILayout.MinWidth(110)))
                 Refresh();
-
-            GUILayout.Space(6);
-
-            // Bouton EXPORT JSON (teinte bleue) : dump complet de toutes les valeurs.
-            var exportStyle = new GUIStyle(buttonStyle);
-            exportStyle.normal.background = MakeRoundedTex(32, 32, new Color(0.40f, 0.70f, 1f, 0.18f), 5);
-            exportStyle.normal.textColor  = new Color(0.55f, 0.80f, 1f, 1f);
-            exportStyle.hover.textColor   = Color.white;
-            if (GUILayout.Button(
-                    new GUIContent("COPY JSON",
-                        "Copie dans le presse-papier un JSON complet (champs connus + extra + [EditValue]) " +
-                        "avec toutes les valeurs courantes. N'écrase pas Config.json."),
-                    exportStyle, GUILayout.Height(34), GUILayout.MinWidth(120)))
-                ExportFakeJson();
 
             GUILayout.FlexibleSpace();
 
@@ -738,11 +846,46 @@ namespace VaroniaBackOffice
                 return;
             }
 
-            var jObj = BuildConfigJson();
-            string json = jObj.ToString(Formatting.Indented);
+            GameConfigCopyPreviewWindow.Show("JSON COMPLET", BuildConfigJson());
+        }
 
-            EditorGUIUtility.systemCopyBuffer = json;
-            Debug.Log($"[GameConfig Editor] JSON complet ({jObj.Count} clés) copié dans le presse-papier.");
+        /// <summary>
+        /// Copie un sous-ensemble du JSON : seulement les champs "tablet" (tablet=true)
+        /// ou seulement les "scene" (tablet=false), selon les flags istablet.
+        /// </summary>
+        private void ExportSubsetJson(bool tablet)
+        {
+            if (_configObj == null)
+            {
+                Debug.LogWarning("[GameConfig Editor] Rien à copier (type 'GameConfig' introuvable).");
+                return;
+            }
+
+            var full = BuildConfigJson();
+            var sub  = new JObject();
+            foreach (var prop in full.Properties())
+            {
+                bool isTablet = _tabletKeys.Contains(prop.Name);
+                if (tablet == isTablet) sub[prop.Name] = prop.Value;
+            }
+
+            if (tablet)
+            {
+                // Les enums sont sérialisés en int dans le JSON → on transmet à part les noms
+                // de valeurs + la valeur courante pour pouvoir générer un radio.
+                var enums = new Dictionary<string, (string[] names, string current)>();
+                if (_knownFields != null && _configObj != null)
+                    foreach (var f in _knownFields)
+                        if (f.FieldType.IsEnum && _tabletKeys.Contains(f.Name))
+                        {
+                            var v = f.GetValue(_configObj);
+                            enums[f.Name] = (Enum.GetNames(f.FieldType), v != null ? v.ToString() : "");
+                        }
+
+                GameConfigTabletExportWindow.Show(sub, enums); // descripteur d'UI (checkbox/numeric/text/radio)
+            }
+            else
+                GameConfigCopyPreviewWindow.Show("JSON SCENE", sub);
         }
 
         // ─── Helpers ──────────────────────────────────────────────────────────────
@@ -824,6 +967,12 @@ namespace VaroniaBackOffice
             public void Card(Action content, Color accent)  => _w.DrawCard(content, accent);
             public void SectionLabel(string text)           => _w.DrawSectionLabel(text);
             public void Divider()                           => _w.DrawDivider();
+
+            /// <summary>Dessine la case "istablet" pour une clé d'addon (même persistance projet
+            /// que les champs connus). À placer en début de ligne dans OnDraw.</summary>
+            public void TabletToggle(string key)            => _w.DrawTabletToggle(key);
+            /// <summary>True si la clé est marquée "tablet".</summary>
+            public bool IsTablet(string key)                => _w._tabletKeys.Contains(key);
 
             // Shared palette
             public Color Accent     => colAccent;

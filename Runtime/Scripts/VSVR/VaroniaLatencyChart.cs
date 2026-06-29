@@ -807,6 +807,12 @@ namespace VaroniaBackOffice
                 // Pas de chart en mode spectateur.
                 show = !isSpectator && BackOfficeVaronia.Instance.config.HideMode == 0;
             }
+#if VBO_UITOOLKIT_OVERLAYS
+            // Important : l'Update UITK ne tourne que si show==true, donc il ne peut pas
+            // re-masquer le panneau. On force ici le display quand show passe à false.
+            if (_panelU != null)
+                _panelU.style.display = show ? DisplayStyle.Flex : DisplayStyle.None;
+#endif
         }
 
 #if !VBO_UITOOLKIT_OVERLAYS

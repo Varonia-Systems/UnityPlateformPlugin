@@ -107,6 +107,21 @@ namespace VaroniaBackOffice
         // Hover
         private int _hoveredIndex = -1;
 
+        // Cache layout des lignes (hauteur variable selon le texte)
+        private string[] _rowContents = new string[0];
+        private float[]  _rowOffsets  = new float[0];
+        private float[]  _rowHeights  = new float[0];
+
+        // ── Command line ──
+        private string _cmdInput = "";
+        private readonly List<string> _cmdHistory = new List<string>();
+        private int _cmdHistoryIndex = -1;
+        private bool _focusCmd;
+        private readonly Dictionary<string, Action<string[]>> _commands = new Dictionary<string, Action<string[]>>(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, string> _cmdHelp = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        private readonly List<string> _suggestions = new List<string>();
+        private const string CmdControlName = "VaroniaCmdInput";
+
         // F12 maintenu
         private float _f12HoldTime;
         private const float F12HoldThreshold = 1.0f;
@@ -127,6 +142,7 @@ namespace VaroniaBackOffice
         private GUIStyle  _popupStyle;
         private GUIStyle  _popupStackStyle;
         private GUIStyle  _popupTitleStyle;
+        private GUIStyle  _cmdStyle;
         private Texture2D _bgTex;
         private Texture2D _headerTex;
         private Texture2D _accentTex;
@@ -178,6 +194,8 @@ namespace VaroniaBackOffice
 
         private void OnEnable()
         {
+            RegisterCommandsOnce();
+
             // Stopper la capture statique et fusionner les entrées précoces
             _earlyCapturing = false;
             Application.logMessageReceivedThreaded -= OnEarlyLog;
@@ -360,6 +378,102 @@ namespace VaroniaBackOffice
 #endif
         }
 
+        // ─── Command system ─────────────────────────────────────────────────────────
+
+        private void RegisterCommandsOnce()
+        {
+            if (_commands.Count > 0) return;
+
+            Register("--globalconfig", "Affiche les valeurs de GlobalConfig", _ =>
+            {
+                var bo = BackOfficeVaronia.Instance;
+                if (bo == null || bo.config == null) { Debug.LogWarning("[cmd] GlobalConfig indisponible."); return; }
+                Debug.Log("# GlobalConfig :\n" + bo.config.ToJson());
+            });
+
+#if GAME_CONFIG
+            Register("--gameconfig", "Affiche les valeurs de GameConfig", _ =>
+            {
+                var bo = BackOfficeVaronia.Instance;
+                if (bo == null || bo.gameConfig == null) { Debug.LogWarning("[cmd] GameConfig indisponible."); return; }
+                Debug.Log("# GameConfig :\n" +
+                    Newtonsoft.Json.JsonConvert.SerializeObject(bo.gameConfig, Newtonsoft.Json.Formatting.Indented));
+            });
+#endif
+
+            Register("--help", "Liste les commandes disponibles", _ =>
+            {
+                var sb = new StringBuilder("# Commandes :\n");
+                foreach (var kv in _cmdHelp) sb.AppendLine($"  • {kv.Key} — {kv.Value}");
+                Debug.Log(sb.ToString());
+            });
+
+            Register("--clear", "Vide la console", _ =>
+            {
+                lock (_lock) _entries.Clear();
+                _dirty = true;
+            });
+        }
+
+        private void Register(string name, string help, Action<string[]> handler)
+        {
+            _commands[name] = handler;
+            _cmdHelp[name]  = help;
+        }
+
+        private void ExecuteCommand(string raw)
+        {
+            string line = (raw ?? "").Trim();
+            if (line.Length == 0) return;
+
+            _cmdHistory.Add(line);
+            _cmdHistoryIndex = _cmdHistory.Count;
+
+            var parts = line.Split(new[] { ' ' }, StringSplitOptions.RemoveEmptyEntries);
+            string name = parts[0];
+            var args = new string[Mathf.Max(0, parts.Length - 1)];
+            if (args.Length > 0) Array.Copy(parts, 1, args, 0, args.Length);
+
+            if (_commands.TryGetValue(name, out var handler))
+            {
+                try { handler(args); }
+                catch (Exception e) { Debug.LogError($"[cmd] '{name}' erreur : {e.Message}"); }
+            }
+            else
+            {
+                Debug.LogWarning($"[cmd] commande inconnue : '{name}'  (tape '--help')");
+            }
+
+            _cmdInput = "";
+        }
+
+        // Met à jour la liste des suggestions selon le préfixe tapé (tant qu'on est sur le nom).
+        private void ComputeSuggestions()
+        {
+            _suggestions.Clear();
+            string prefix = (_cmdInput ?? "").TrimStart();
+            if (prefix.Length == 0 || prefix.Contains(" ")) return; // on ne complète que le nom
+            foreach (var name in _commands.Keys)
+                if (name.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                    _suggestions.Add(name);
+            _suggestions.Sort(StringComparer.OrdinalIgnoreCase);
+        }
+
+        private void AutoComplete()
+        {
+            if (_suggestions.Count == 0) return;
+            _cmdInput = _suggestions[0] + " ";
+            _focusCmd = true;
+        }
+
+        private void HistoryNav(int dir)
+        {
+            if (_cmdHistory.Count == 0) return;
+            _cmdHistoryIndex = Mathf.Clamp(_cmdHistoryIndex + dir, 0, _cmdHistory.Count);
+            _cmdInput = _cmdHistoryIndex < _cmdHistory.Count ? _cmdHistory[_cmdHistoryIndex] : "";
+            _focusCmd = true;
+        }
+
         private void RebuildFiltered()
         {
             _filtered.Clear();
@@ -480,13 +594,35 @@ namespace VaroniaBackOffice
             float divY = panel.y + headerH;
             GUI.DrawTexture(new Rect(panel.x + 8f * scale, divY, panel.width - 16f * scale, 1f * scale), _dividerTex);
 
+            // ── Barre de commande réservée en bas ──
+            float inputH = sFontSize + 14f * scale;
+
             // ── Scroll view ──
             float bodyY = divY + 2f * scale;
-            float bodyH = panel.height - headerH - 2f * scale;
+            float bodyH = panel.height - headerH - 2f * scale - inputH;
             Rect  bodyR = new Rect(panel.x + 4f * scale, bodyY, panel.width - 8f * scale, bodyH);
 
-            float totalH   = _filtered.Count * lineH;
-            Rect  viewRect = new Rect(0, 0, bodyR.width - 4f * scale, Mathf.Max(totalH, bodyH));
+            // Largeur de texte dispo (pour le word-wrap / calcul de hauteur)
+            float textW = (bodyR.width - 4f * scale) - textX - 4f * scale;
+            if (textW < 20f * scale) textW = 20f * scale;
+
+            // Contenu + hauteur de chaque ligne (variable selon la longueur du texte).
+            int count = _filtered.Count;
+            if (_rowContents.Length < count) { _rowContents = new string[count]; _rowOffsets = new float[count]; _rowHeights = new float[count]; }
+            float totalH = 0f;
+            for (int i = 0; i < count; i++)
+            {
+                var entry = _filtered[i];
+                string timePrefix = entry.Time != default ? entry.Time.ToString("HH:mm:ss") + "  " : "";
+                _rowContents[i] = timePrefix + (entry.Text ?? "");
+                float h = _entryStyle.CalcHeight(new GUIContent(_rowContents[i]), textW);
+                h = Mathf.Max(h, lineH) + 4f * scale;
+                _rowOffsets[i] = totalH;
+                _rowHeights[i] = h;
+                totalH += h;
+            }
+
+            Rect viewRect = new Rect(0, 0, bodyR.width - 4f * scale, Mathf.Max(totalH, bodyH));
 
             _scroll = GUI.BeginScrollView(bodyR, _scroll, viewRect, false, false, GUIStyle.none, GUIStyle.none);
 
@@ -496,9 +632,9 @@ namespace VaroniaBackOffice
             {
                 Vector2 localMouse = ev.mousePosition;
                 int hovered = -1;
-                for (int i = 0; i < _filtered.Count; i++)
+                for (int i = 0; i < count; i++)
                 {
-                    Rect r = new Rect(0f, i * lineH, viewRect.width, lineH);
+                    Rect r = new Rect(0f, _rowOffsets[i], viewRect.width, _rowHeights[i]);
                     if (r.Contains(localMouse)) { hovered = i; break; }
                 }
                 if (hovered != _hoveredIndex)
@@ -508,11 +644,12 @@ namespace VaroniaBackOffice
                 }
             }
 
-            for (int i = 0; i < _filtered.Count; i++)
+            for (int i = 0; i < count; i++)
             {
                 var   entry = _filtered[i];
-                float yLine = i * lineH;
-                Rect  lineR = new Rect(0f, yLine, viewRect.width, lineH);
+                float yLine = _rowOffsets[i];
+                float hRow  = _rowHeights[i];
+                Rect  lineR = new Rect(0f, yLine, viewRect.width, hRow);
 
                 // Zébrage
                 if (i % 2 == 1)
@@ -532,14 +669,13 @@ namespace VaroniaBackOffice
                 else
                 { col = ColInfo;  dot = _infoTex;  }
 
-                // Pastille centrée verticalement
-                float dotY = yLine + (lineH - dotSize) * 0.5f;
+                // Pastille alignée sur la 1ʳᵉ ligne
+                float dotY = yLine + (lineH - dotSize) * 0.5f + 2f * scale;
                 GUI.DrawTexture(new Rect(dotX, dotY, dotSize, dotSize), dot);
 
-                // Texte centré verticalement
+                // Texte multi-ligne (word-wrap) sur toute la hauteur de la ligne.
                 _entryStyle.normal.textColor = col;
-                string timePrefix = entry.Time != default ? entry.Time.ToString("HH:mm:ss") + "  " : "";
-                GUI.Label(new Rect(textX, yLine, viewRect.width - textX - 4f * scale, lineH), timePrefix + entry.Text, _entryStyle);
+                GUI.Label(new Rect(textX, yLine + 2f * scale, textW, hRow - 4f * scale), _rowContents[i], _entryStyle);
 
                 // Détection double-clic
                 if (ev.type == EventType.MouseDown && lineR.Contains(ev.mousePosition))
@@ -570,9 +706,79 @@ namespace VaroniaBackOffice
 
             GUI.EndScrollView();
 
+            // ── Barre de commande ──
+            DrawCommandBar(panel, scale, inputH);
+
             // ── Popup détail ──
             if (_popupOpen)
                 DrawPopup(panel, scale);
+        }
+
+        private void DrawCommandBar(Rect panel, float scale, float inputH)
+        {
+            float sFontSize = fontSize * scale;
+            Event e = Event.current;
+
+            ComputeSuggestions();
+
+            Rect inRow = new Rect(panel.x + 3f * scale, panel.y + panel.height - inputH, panel.width - 3f * scale, inputH);
+            GUI.DrawTexture(inRow, _headerTex);
+
+            bool focused = GUI.GetNameOfFocusedControl() == CmdControlName;
+            if (focused && _suggestions.Count > 0)
+                DrawSuggestions(inRow, scale, sFontSize);
+
+            GUI.Label(new Rect(inRow.x + 8f * scale, inRow.y, 16f * scale, inputH), ">", _headerStyle);
+
+            GUI.SetNextControlName(CmdControlName);
+            Rect tf = new Rect(inRow.x + 22f * scale, inRow.y + 3f * scale, inRow.width - 30f * scale, inputH - 6f * scale);
+            _cmdInput = GUI.TextField(tf, _cmdInput ?? "", _cmdStyle);
+
+            // Le TextField single-line CONSOMME le KeyDown de Entrée → on valide sur KeyUp.
+            bool isCmd = GUI.GetNameOfFocusedControl() == CmdControlName;
+            if (isCmd && e.type == EventType.KeyUp &&
+                (e.keyCode == KeyCode.Return || e.keyCode == KeyCode.KeypadEnter))
+            {
+                ExecuteCommand(_cmdInput);
+                GUIUtility.keyboardControl = 0; // resync (vide) le champ au refocus
+                _focusCmd = true;
+            }
+            // Tab / historique : sur KeyDown (non consommés par le champ pour ces touches).
+            else if (isCmd && e.type == EventType.KeyDown)
+            {
+                if (e.keyCode == KeyCode.Tab)        { AutoComplete();  GUIUtility.keyboardControl = 0; e.Use(); }
+                else if (e.keyCode == KeyCode.UpArrow)   { HistoryNav(-1); GUIUtility.keyboardControl = 0; e.Use(); }
+                else if (e.keyCode == KeyCode.DownArrow) { HistoryNav(+1); GUIUtility.keyboardControl = 0; e.Use(); }
+            }
+
+            if (_focusCmd)
+            {
+                _focusCmd = false;
+                GUI.FocusControl(CmdControlName);
+            }
+        }
+
+        private void DrawSuggestions(Rect inRow, float scale, float sFontSize)
+        {
+            int   n     = Mathf.Min(_suggestions.Count, 6);
+            float itemH = sFontSize + 6f * scale;
+            float h     = n * itemH;
+            Rect  box   = new Rect(inRow.x + 22f * scale, inRow.y - h - 2f * scale, 240f * scale, h);
+
+            GUI.DrawTexture(box, _popupBgTex);
+            _entryStyle.normal.textColor = ColValue;
+
+            for (int i = 0; i < n; i++)
+            {
+                Rect item = new Rect(box.x, box.y + i * itemH, box.width, itemH);
+                if (item.Contains(Event.current.mousePosition))
+                    GUI.DrawTexture(item, _rowHoverTex);
+                if (GUI.Button(item, "  " + _suggestions[i], _entryStyle))
+                {
+                    _cmdInput = _suggestions[i] + " ";
+                    _focusCmd = true;
+                }
+            }
         }
 
         private void DrawErrorBadge()
@@ -745,8 +951,8 @@ namespace VaroniaBackOffice
             {
                 fontSize  = Mathf.RoundToInt(sFontSize),
                 fontStyle = FontStyle.Normal,
-                alignment = TextAnchor.MiddleLeft,
-                wordWrap  = false,
+                alignment = TextAnchor.UpperLeft,   // multi-ligne : démarre en haut
+                wordWrap  = true,                   // hauteur variable selon le texte
                 clipping  = TextClipping.Clip,
                 normal    = { textColor = ColValue },
                 padding   = new RectOffset(Mathf.RoundToInt(2 * scale), Mathf.RoundToInt(4 * scale), 0, 0),
@@ -781,6 +987,14 @@ namespace VaroniaBackOffice
                 fontStyle = FontStyle.Bold,
                 alignment = TextAnchor.MiddleLeft,
                 normal    = { textColor = ColValue },
+            };
+
+            _cmdStyle = new GUIStyle(GUI.skin.textField)
+            {
+                fontSize  = Mathf.RoundToInt(sFontSize),
+                alignment = TextAnchor.MiddleLeft,
+                normal    = { textColor = ColValue },
+                focused   = { textColor = ColValue },
             };
 
             _popupStackStyle = new GUIStyle

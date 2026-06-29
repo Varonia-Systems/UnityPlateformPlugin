@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
@@ -105,7 +106,7 @@ namespace VaroniaBackOffice
                                 System.Reflection.BindingFlags.Instance);
                 if (fShow == null || pPos == null) goto fallback;
 
-                foreach (Object win in Resources.FindObjectsOfTypeAll(T))
+                foreach (UnityEngine.Object win in Resources.FindObjectsOfTypeAll(T))
                     if ((int)fShow.GetValue(win) == 4)   // 4 = MainWindow
                         return (Rect)pPos.GetValue(win);
             }
@@ -557,6 +558,15 @@ namespace VaroniaBackOffice
                 active={textColor=Color.white, background=MakeRoundedTex(32,32,colWarn,5)} };
             if (GUILayout.Button("↩  Retake", retakeStyle, GUILayout.Height(36))) Retake();
             GUILayout.Space(6);
+            // Save As — outline neutre, ouvre une boîte de dialogue pour choisir l'emplacement.
+            var saveAsStyle = new GUIStyle(_buttonStyle) { fontSize=11, fontStyle=FontStyle.Bold,
+                padding=new RectOffset(12,12,5,5),
+                normal={textColor=colTextPrimary, background=MakeRoundedTex(32,32,colBtnNormal,6)},
+                hover ={textColor=Color.white,    background=MakeRoundedTex(32,32,colBtnHover,6)},
+                active={textColor=Color.white,    background=MakeRoundedTex(32,32,colAccent,6)},
+                border=new RectOffset(6,6,6,6) };
+            if (GUILayout.Button("💾  Save As…", saveAsStyle, GUILayout.Height(36))) SaveAsAndExit();
+            GUILayout.Space(6);
             var saveStyle = new GUIStyle { fontSize=11, fontStyle=FontStyle.Bold,
                 alignment=TextAnchor.MiddleCenter, border=new RectOffset(6,6,6,6),
                 padding=new RectOffset(12,12,5,5),
@@ -838,6 +848,10 @@ namespace VaroniaBackOffice
             _capturedTex.ReadPixels(new Rect(0,0,1920,1080),0,0);
             _capturedTex.Apply();
             _tempCam.targetTexture=null; RenderTexture.active=null; DestroyImmediate(rt);
+
+            // Filigrane baké dans l'image (présent dans l'aperçu paint ET le JPG final).
+            BakeWatermark(_capturedTex, BuildWatermarkText());
+
             _originalPixels=_capturedTex.GetPixels32();
             _undoHistory.Clear();
             _shapeDragging=_brushStroking=_texDirty=false;
@@ -847,6 +861,97 @@ namespace VaroniaBackOffice
             // Use GoFullScreen() which reads the actual Unity main window bounds
             // via reflection — more reliable than maximized=true on floating windows.
             GoFullScreen();
+        }
+
+        // ── Filigrane ──────────────────────────────────────────────────────────────
+
+        string BuildWatermarkText()
+        {
+            string scene = SceneManager.GetActiveScene().name;
+            if (string.IsNullOrEmpty(scene)) scene = "UntitledScene";
+            return $"{scene}    ·    Zoom {Mathf.RoundToInt(_orthoSize)}    ·    {DateTime.Now:yyyy-MM-dd HH:mm}";
+        }
+
+        // Bake un filigrane (plaque sombre + texte blanc) en bas à gauche, directement
+        // dans la Texture2D. Texte rendu via la police built-in (glyphes en GL → RT →
+        // ReadPixels), puis composité par-dessus l'image.
+        static void BakeWatermark(Texture2D tex, string text)
+        {
+            if (tex == null || string.IsNullOrEmpty(text)) return;
+
+            var font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf")
+                    ?? Resources.GetBuiltinResource<Font>("Arial.ttf");
+            if (font == null) return;
+
+            const int fontSize = 32;
+            const FontStyle style = FontStyle.Bold;
+            font.RequestCharactersInTexture(text, fontSize, style);
+
+            // Mesure largeur + descente max.
+            float textW = 0f, maxDesc = 0f;
+            foreach (char c in text)
+            {
+                if (!font.GetCharacterInfo(c, out var ci, fontSize, style)) continue;
+                textW  += ci.advance;
+                maxDesc = Mathf.Max(maxDesc, -ci.minY);
+            }
+
+            const int padX = 18, padY = 12;
+            int boxW = Mathf.CeilToInt(textW) + padX * 2;
+            int boxH = fontSize + padY * 2;
+            if (boxW <= 0 || boxH <= 0) return;
+
+            // ── Rendu de la plaque + texte dans un petit RenderTexture ──
+            var rt   = RenderTexture.GetTemporary(boxW, boxH, 0, RenderTextureFormat.ARGB32);
+            var prev = RenderTexture.active;
+            RenderTexture.active = rt;
+            GL.Clear(true, true, new Color(0.06f, 0.06f, 0.08f, 1f)); // plaque sombre opaque
+            GL.PushMatrix();
+            GL.LoadPixelMatrix(0, boxW, boxH, 0); // origine top-left, Y vers le bas
+
+            font.material.SetPass(0);
+            GL.Begin(GL.QUADS);
+            GL.Color(Color.white);
+            float penX = padX;
+            float baseline = boxH - padY - maxDesc;
+            foreach (char c in text)
+            {
+                if (!font.GetCharacterInfo(c, out var ci, fontSize, style)) continue;
+                float left = penX + ci.minX, right = penX + ci.maxX;
+                float top  = baseline - ci.maxY, bottom = baseline - ci.minY;
+                GL.TexCoord(ci.uvTopLeft);     GL.Vertex3(left,  top,    0);
+                GL.TexCoord(ci.uvTopRight);    GL.Vertex3(right, top,    0);
+                GL.TexCoord(ci.uvBottomRight); GL.Vertex3(right, bottom, 0);
+                GL.TexCoord(ci.uvBottomLeft);  GL.Vertex3(left,  bottom, 0);
+                penX += ci.advance;
+            }
+            GL.End();
+            GL.PopMatrix();
+
+            var stamp = new Texture2D(boxW, boxH, TextureFormat.RGBA32, false);
+            stamp.ReadPixels(new Rect(0, 0, boxW, boxH), 0, 0);
+            stamp.Apply();
+            RenderTexture.active = prev;
+            RenderTexture.ReleaseTemporary(rt);
+
+            // ── Composition en bas à gauche (row 0 = bas, comme une Texture2D Unity) ──
+            const int margin = 24;
+            const float globalAlpha = 0.72f; // plaque translucide
+            int TW = tex.width, TH = tex.height;
+            var basePx  = tex.GetPixels32();
+            var stampPx = stamp.GetPixels32();
+            for (int sy = 0; sy < boxH; sy++)
+            for (int sx = 0; sx < boxW; sx++)
+            {
+                int dx = margin + sx, dy = margin + sy;
+                if (dx < 0 || dx >= TW || dy < 0 || dy >= TH) continue;
+                var s = stampPx[sy * boxW + sx];
+                var d = basePx[dy * TW + dx];
+                basePx[dy * TW + dx] = Color32.Lerp(d, new Color32(s.r, s.g, s.b, 255), globalAlpha);
+            }
+            tex.SetPixels32(basePx);
+            tex.Apply();
+            DestroyImmediate(stamp);
         }
 
         void SaveAndExit()
@@ -879,6 +984,33 @@ namespace VaroniaBackOffice
             File.WriteAllBytes(path,bytes);
             if (path.StartsWith(Application.dataPath)) AssetDatabase.Refresh();
             Debug.Log($"[Ortho] Saved → {path}");
+            ResetCursor();
+            Close();
+        }
+
+        // Save As : laisse l'utilisateur choisir le dossier ET le nom via une boîte de dialogue.
+        // Le filigrane est déjà baké dans _capturedTex (depuis CaptureAndShow), donc le JPG le contient.
+        void SaveAsAndExit()
+        {
+            if (_capturedTex==null) return;
+            if (_texDirty){_capturedTex.Apply();_texDirty=false;}
+
+            string scene=SceneManager.GetActiveScene().name;
+            if (string.IsNullOrEmpty(scene)) scene="UntitledScene";
+            string defaultName=$"{scene}_{_orthoSize:F0}.jpg";
+
+            // Dossier par défaut : OrthoSourcePath si valide, sinon Assets/.
+            string defaultDir=EditorPrefs.GetString(k_PathKey);
+            if (string.IsNullOrEmpty(defaultDir) || !Directory.Exists(defaultDir))
+                defaultDir=Application.dataPath;
+
+            string path=EditorUtility.SaveFilePanel("Save Ortho Capture As", defaultDir, defaultName, "jpg");
+            if (string.IsNullOrEmpty(path)) return; // annulé → on reste en mode paint
+
+            byte[] bytes=_capturedTex.EncodeToJPG(95);
+            File.WriteAllBytes(path,bytes);
+            if (path.Replace('\\','/').StartsWith(Application.dataPath)) AssetDatabase.Refresh();
+            Debug.Log($"[Ortho] Saved As → {path}");
             ResetCursor();
             Close();
         }

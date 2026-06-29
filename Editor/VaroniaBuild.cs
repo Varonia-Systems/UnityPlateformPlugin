@@ -258,6 +258,8 @@ namespace VaroniaBackOffice
         public static List<BuildMessage> LastBuildMessages;
         public static BuildReport        LastBuildReport;
         static bool _endBuildCalled;
+        static bool _installAfterBuild; // "Build & Install" : installer l'APK après le build, sans zip/copy
+        static string _launchSerialAfterInstall; // "Build & Run" (Device Monitor) : device à lancer après l'install
 
         static VaroniaBuild VaroniaBuild_;
         Vector2 _scrollLog;
@@ -532,6 +534,34 @@ namespace VaroniaBackOffice
             GUILayout.Space(16);
             EditorGUILayout.EndHorizontal();
 
+            // ── Récap éditable : nom du jeu · compagnie (PlayerSettings) ──
+            var recapLblStyle = new GUIStyle
+            {
+                fontSize  = 10,
+                fontStyle = FontStyle.Bold,
+                alignment = TextAnchor.MiddleRight,
+                normal    = { textColor = colTextMuted },
+                padding   = new RectOffset(0, 6, 4, 4),
+            };
+
+            EditorGUILayout.BeginHorizontal();
+            GUILayout.Space(16);
+
+            GUILayout.Label("GAME", recapLblStyle, GUILayout.Width(44));
+            EditorGUI.BeginChangeCheck();
+            string newProduct = EditorGUILayout.TextField(PlayerSettings.productName);
+            if (EditorGUI.EndChangeCheck()) PlayerSettings.productName = newProduct;
+
+            GUILayout.Space(8);
+
+            GUILayout.Label("COMPANY", recapLblStyle, GUILayout.Width(64));
+            EditorGUI.BeginChangeCheck();
+            string newCompany = EditorGUILayout.TextField(PlayerSettings.companyName);
+            if (EditorGUI.EndChangeCheck()) PlayerSettings.companyName = newCompany;
+
+            GUILayout.Space(16);
+            EditorGUILayout.EndHorizontal();
+
             EditorGUILayout.Space(12);
 
             // ── Card Statut ──
@@ -801,6 +831,45 @@ namespace VaroniaBackOffice
             GUILayout.Space(12);
             EditorGUILayout.EndHorizontal();
 
+            // ── Android : Build & Install / Install (dernier APK) ──
+            if (activeTarget == BuildTarget.Android)
+            {
+                EditorGUILayout.Space(6);
+                EditorGUILayout.BeginHorizontal();
+                GUILayout.Space(12);
+
+                var andStyle = new GUIStyle(buttonStyle);
+                andStyle.normal.background = MakeRoundedTex(32, 32, new Color(0.45f, 0.75f, 0.40f, 0.18f), 5);
+                andStyle.normal.textColor  = new Color(0.60f, 0.90f, 0.45f, 1f);
+                andStyle.hover.textColor   = Color.white;
+
+                using (new EditorGUI.DisabledScope(!canBuild))
+                {
+                    if (GUILayout.Button(new GUIContent("📲  BUILD & INSTALL",
+                            "Build l'APK puis l'installe sur le device ADB (sans zip / copie serveur)."),
+                            andStyle, GUILayout.Height(30)))
+                    {
+                        _installAfterBuild = true;
+                        savelog();
+                        StartPipeline(gameId);
+                    }
+                }
+
+                GUILayout.Space(4);
+
+                bool apkExists = File.Exists(ApkPath());
+                using (new EditorGUI.DisabledScope(!apkExists))
+                {
+                    if (GUILayout.Button(new GUIContent(apkExists ? "📲  INSTALL (dernier APK)" : "📲  INSTALL (aucun APK)",
+                            "Installe le dernier APK buildé sur le device ADB."),
+                            andStyle, GUILayout.Height(30)))
+                        InstallLastApk();
+                }
+
+                GUILayout.Space(12);
+                EditorGUILayout.EndHorizontal();
+            }
+
             EditorGUILayout.Space(6);
             GUILayout.Label("Varonia Back Office  ·  Build Pipeline", footerStyle);
             EditorGUILayout.Space(6);
@@ -958,6 +1027,8 @@ namespace VaroniaBackOffice
 
             if (!success)
             {
+                _installAfterBuild = false;
+                _launchSerialAfterInstall = null;
                 PlayFailure();
                 Buildwindows.CloseWindow();
                 UnityEngine.Debug.LogError("[VaroniaBuild] ❌ Build échoué.");
@@ -967,6 +1038,15 @@ namespace VaroniaBackOffice
                     var errorsOnly = LastBuildMessages.Where(m => m.IsError).ToList();
                     EditorApplication.delayCall += () => BuildErrorWindow.ShowErrors(LastBuildReport, errorsOnly);
                 }
+                return;
+            }
+
+            // ── Build & Install : on saute le pipeline zip/copy, on installe juste l'APK ──
+            if (_installAfterBuild)
+            {
+                _installAfterBuild = false;
+                Buildwindows.CloseWindow();
+                InstallLastApkAuto();
                 return;
             }
 
@@ -1327,7 +1407,45 @@ namespace VaroniaBackOffice
             }
         }
 
-        void Build(string GameId)
+        /// <summary>Build & Run (appelé par le Device Monitor) : build l'APK, l'installe
+        /// sur le device cible puis lance l'app. Sans zip / copie serveur / changelog.</summary>
+        public static void BuildAndRun(string serial)
+        {
+            _installAfterBuild = true;
+            _launchSerialAfterInstall = serial;
+            Build(null);
+        }
+
+        /// <summary>Install seul du dernier APK buildé sur un device précis (Device Monitor),
+        /// sans build ni lancement. Réapplique le droit storage après l'install.</summary>
+        public static void InstallOnDevice(string serial)
+        {
+            string apk = ApkPath();
+            if (!File.Exists(apk))
+            {
+                EditorUtility.DisplayDialog("Install APK", "APK introuvable :\n" + apk + "\n\nLance d'abord un build Android.", "OK");
+                return;
+            }
+
+            var devices = AdbListDevices(out string err);
+            if (devices == null || devices.Count == 0)
+            {
+                EditorUtility.DisplayDialog("Install APK",
+                    devices == null ? ("Erreur adb : " + err) : "Aucun device ADB connecté.", "OK");
+                return;
+            }
+
+            var target = devices.Where(d => d.serial == serial).ToList();
+            if (target.Count == 0)
+            {
+                EditorUtility.DisplayDialog("Install APK", $"Device {serial} introuvable (déconnecté ?).", "OK");
+                return;
+            }
+
+            InstallApkOnDevices(apk, target);
+        }
+
+        static void Build(string GameId)
         {
             _endBuildCalled = false;
             PipelineTimings.BuildTimer.Restart();
@@ -1373,6 +1491,171 @@ namespace VaroniaBackOffice
                     EndBuild(false);
                 }
             };
+        }
+
+        // ─── ADB install (Android) ─────────────────────────────────────────────────
+
+        struct AdbDevice
+        {
+            public string serial, model;
+            public override string ToString() => string.IsNullOrEmpty(model) ? serial : $"{serial} ({model})";
+        }
+
+        static string ApkPath() =>
+            EditorPrefs.GetString("VBO_BuildPath") + "/" + Application.productName + "/" + Application.productName + ".apk";
+
+        // Bouton "Install" : choix du device si plusieurs.
+        void InstallLastApk()
+        {
+            string apk = ApkPath();
+            if (!File.Exists(apk))
+            {
+                EditorUtility.DisplayDialog("Install APK", "APK introuvable :\n" + apk + "\n\nLance d'abord un build Android.", "OK");
+                return;
+            }
+
+            var devices = AdbListDevices(out string err);
+            if (devices == null) { EditorUtility.DisplayDialog("Install APK", "Erreur adb :\n" + err + "\n\n(adb doit être dans le PATH)", "OK"); return; }
+            if (devices.Count == 0) { EditorUtility.DisplayDialog("Install APK", "Aucun device ADB connecté.", "OK"); return; }
+            if (devices.Count == 1) { InstallApkOnDevices(apk, devices); return; }
+
+            var menu = new GenericMenu();
+            foreach (var d in devices)
+            {
+                var single = new List<AdbDevice> { d };
+                menu.AddItem(new GUIContent(d.ToString()), false, () => InstallApkOnDevices(apk, single));
+            }
+            menu.AddSeparator("");
+            menu.AddItem(new GUIContent("→ Tous les devices"), false, () => InstallApkOnDevices(apk, devices));
+            menu.ShowAsContext();
+        }
+
+        // Après "Build & Install" : installe sur tous les devices connectés (auto).
+        static void InstallLastApkAuto()
+        {
+            string apk = ApkPath();
+            if (!File.Exists(apk))
+            {
+                EditorUtility.DisplayDialog("Install APK", "APK introuvable après le build :\n" + apk, "OK");
+                PlayFailure();
+                return;
+            }
+
+            var devices = AdbListDevices(out string err);
+            if (devices == null || devices.Count == 0)
+            {
+                _launchSerialAfterInstall = null;
+                EditorUtility.DisplayDialog("Install APK",
+                    devices == null ? ("Erreur adb : " + err) : "Build OK, mais aucun device ADB connecté → APK non installé.", "OK");
+                return;
+            }
+
+            // Build & Run : on cible uniquement le device demandé par le Device Monitor
+            if (!string.IsNullOrEmpty(_launchSerialAfterInstall))
+            {
+                var target = devices.Where(d => d.serial == _launchSerialAfterInstall).ToList();
+                if (target.Count > 0) devices = target;
+                else _launchSerialAfterInstall = null; // device parti entre temps -> install classique
+            }
+
+            InstallApkOnDevices(apk, devices);
+        }
+
+        static async void InstallApkOnDevices(string apk, List<AdbDevice> targets)
+        {
+            Buildwindows.SetState("INSTALL", "Installation de l'APK…", 0f, indeterminate: true);
+            Buildwindows.ShowWindow();
+
+            // Capture sur le thread principal (interdit dans un Task.Run)
+            string packageId = Application.identifier;
+
+            int ok = 0, fail = 0;
+            var sb = new System.Text.StringBuilder();
+            foreach (var d in targets)
+            {
+                Buildwindows.SetState("INSTALL", $"Installation sur {(string.IsNullOrEmpty(d.model) ? d.serial : d.model)}…", 0f, indeterminate: true);
+                var res = await Task.Run(() => AdbRun(d.serial, $"install -r \"{apk}\""));
+                bool success = res.code == 0 && (res.outp.Contains("Success") || res.err.Contains("Success"));
+                if (success)
+                {
+                    ok++;
+                    sb.AppendLine($"✓ {d}");
+                    // Le droit storage saute a chaque reinstall -> on le reapplique systematiquement
+                    string serial = d.serial;
+                    await Task.Run(() => AdbRun(serial, $"shell appops set {packageId} MANAGE_EXTERNAL_STORAGE allow"));
+                }
+                else
+                {
+                    fail++;
+                    string msg = string.IsNullOrEmpty(res.err) ? res.outp : res.err;
+                    sb.AppendLine($"✗ {d} : {msg.Trim()}");
+                }
+            }
+
+            // Build & Run : droits storage (perdus à chaque réinstall) puis lancement de l'app
+            string launchSerial = _launchSerialAfterInstall;
+            _launchSerialAfterInstall = null;
+            if (fail == 0 && !string.IsNullOrEmpty(launchSerial))
+            {
+                string pkg = Application.identifier;
+                Buildwindows.SetState("RUN", "Lancement de l'app…", 0f, indeterminate: true);
+                await Task.Run(() => AdbRun(launchSerial, $"shell monkey -p {pkg} 1"));
+                UnityEngine.Debug.Log($"[VaroniaBuild] Build & Run : {pkg} lancé sur {launchSerial}");
+                Buildwindows.CloseWindow();
+                PlaySuccess();
+                return; // pas de dialog bloquant : l'app tourne deja dans le casque
+            }
+
+            Buildwindows.CloseWindow();
+            if (fail == 0) PlaySuccess(); else PlayFailure();
+            EditorUtility.DisplayDialog("Install APK", $"{ok} OK / {fail} échec(s)\n\n{sb}", "OK");
+        }
+
+        static List<AdbDevice> AdbListDevices(out string err)
+        {
+            err = null;
+            var res = AdbRun(null, "devices -l");
+            if (res.code != 0) { err = string.IsNullOrEmpty(res.err) ? ("adb devices code " + res.code) : res.err; return null; }
+
+            var list = new List<AdbDevice>();
+            foreach (var raw in res.outp.Split('\n'))
+            {
+                var line = raw.Trim();
+                if (line.Length == 0 || line.StartsWith("List of devices") || line.StartsWith("*")) continue;
+                var parts = line.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+                if (parts.Length < 2 || parts[1] != "device") continue;
+                string model = "";
+                for (int i = 2; i < parts.Length; i++)
+                    if (parts[i].StartsWith("model:")) { model = parts[i].Substring("model:".Length); break; }
+                list.Add(new AdbDevice { serial = parts[0], model = model });
+            }
+            return list;
+        }
+
+        static (int code, string outp, string err) AdbRun(string serial, string args)
+        {
+            string full = string.IsNullOrEmpty(serial) ? args : ("-s " + serial + " " + args);
+            try
+            {
+                var psi = new ProcessStartInfo
+                {
+                    FileName = "adb", Arguments = full,
+                    UseShellExecute = false, RedirectStandardOutput = true,
+                    RedirectStandardError = true, CreateNoWindow = true,
+                };
+                using (var p = Process.Start(psi))
+                {
+                    if (p == null) return (-1, "", "Process.Start a renvoyé null");
+                    string o = p.StandardOutput.ReadToEnd();
+                    string e = p.StandardError.ReadToEnd();
+                    p.WaitForExit(180000);
+                    return (p.ExitCode, o, e);
+                }
+            }
+            catch (Exception ex)
+            {
+                return (-1, "", "adb introuvable ou erreur : " + ex.Message);
+            }
         }
     }
 

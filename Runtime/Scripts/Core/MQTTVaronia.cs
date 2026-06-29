@@ -119,6 +119,10 @@ namespace VaroniaBackOffice
         {
             PublishMsg(JsonConvert.SerializeObject(new MQTT_Payload() { sMethod = "SET_SOFTSTATE", CallerDeviceID = BackOfficeVaronia.Instance.config.MQTT_IDClient, Items = { { "SoftState", eSoft } } }));
 //            Debug.Log($"[MQTT] Published SoftState: {eSoft}");
+            // Transition vers GAME_INPARTY = début de mission. On teste la transition (et pas l'état)
+            // car le ping (UpConnection) re-publie le même état chaque seconde → pas de ré-armement.
+            if (eSoft == ESoftState.GAME_INPARTY && SoftState != ESoftState.GAME_INPARTY)
+                SoftPartyStarted = true;
             SoftState = eSoft;
         }
         
@@ -143,8 +147,14 @@ namespace VaroniaBackOffice
         
         
         
+        /// <summary>True = mission en cours. Passe à true à la transition vers GAME_INPARTY (= début
+        /// de partie, signalé par les scénarios) ou via SetSoftPartyStarted(), et à false via
+        /// SetSoftPartyClosed(). Posé même sans MQTT. Lu par la GodView pour le chrono de mission.</summary>
+        public bool SoftPartyStarted { get; private set; }
+
         public void SetSoftPartyStarted()
         {
+            SoftPartyStarted = true;
             if (!String.IsNullOrEmpty(BackOfficeVaronia.Instance.config.MQTT_ServerIP))
             {
                 PublishMsg(JsonConvert.SerializeObject(new MQTT_Payload() { sMethod = "SET_SOFTPARTYSTARTED", CallerDeviceID = BackOfficeVaronia.Instance.config.MQTT_IDClient }));
@@ -154,6 +164,7 @@ namespace VaroniaBackOffice
      
         public void SetSoftPartyClosed()
         {
+            SoftPartyStarted = false;
             if (!String.IsNullOrEmpty(BackOfficeVaronia.Instance.config.MQTT_ServerIP))
             {
                 PublishMsg(JsonConvert.SerializeObject(new MQTT_Payload() { sMethod = "SET_SOFTPARTYCLOSED", CallerDeviceID =BackOfficeVaronia.Instance.config.MQTT_IDClient }));

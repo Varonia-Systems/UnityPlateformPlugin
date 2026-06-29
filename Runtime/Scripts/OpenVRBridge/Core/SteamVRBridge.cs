@@ -14,7 +14,19 @@ namespace VaroniaBackOffice
         
         private static bool _initializedByUs = false;
         private static CVRSystem _system;
-        
+
+        // Anti-spam : sans VR, OpenVR.Init() échoue (appel natif lourd/bloquant). On NE le
+        // relance PAS à chaque frame — re-tentative seulement toutes les InitRetryCooldown s,
+        // et on ne loggue l'indisponibilité qu'une fois.
+        private const float InitRetryCooldown = 5f;
+        private static float _nextInitAttempt = 0f;
+        private static bool  _initFailLogged  = false;
+
+        // Poses de tous les devices, pollées UNE fois par frame et partagées entre TOUS les
+        // ItemTracking (évite N appels natifs GetDeviceToAbsoluteTrackingPose redondants/frame).
+        private static readonly TrackedDevicePose_t[] _sharedPoses = new TrackedDevicePose_t[64];
+        private static int _posesFrame = -1;
+
         public static CVRSystem GetSystem()
         {
             // On refuse toute (ré)initialisation pendant le teardown : évite de
@@ -23,27 +35,53 @@ namespace VaroniaBackOffice
 
             // Si Unity a déjà initialisé OpenVR (SteamVR natif)
             if (OpenVR.System != null) return OpenVR.System;
-            
-            // Sinon, on initialise en mode Background (pour OpenXR)
-            if (_system == null && !_initializedByUs)
+
+            // Déjà initialisé par nous (background) → cache, pas de ré-init.
+            if (_initializedByUs && _system != null) return _system;
+
+            // Cooldown anti-spam quand l'init échoue (pas de VR) : 1 tentative / InitRetryCooldown s.
+            if (Time.realtimeSinceStartup < _nextInitAttempt) return null;
+            _nextInitAttempt = Time.realtimeSinceStartup + InitRetryCooldown;
+
+            EVRInitError error = EVRInitError.None;
+            _system = OpenVR.Init(ref error, EVRApplicationType.VRApplication_Background);
+
+            if (error == EVRInitError.None && _system != null)
             {
-                EVRInitError error = EVRInitError.None;
-                _system = OpenVR.Init(ref error, EVRApplicationType.VRApplication_Background);
-                
-                if (error == EVRInitError.None)
+                _initializedByUs = true;
+                _initFailLogged  = false;
+                Debug.Log("#<color=cyan>[VRBridge] Initialisé en mode BACKGROUND.</color>");
+            }
+            else
+            {
+                _system = null;
+                if (!_initFailLogged)
                 {
-                    _initializedByUs = true;
-                    Debug.Log("#<color=cyan>[VRBridge] Initialisé en mode BACKGROUND.</color>");
-                }
-                else
-                {
-                    Debug.LogWarning("#[VRBridge] SteamVR non disponible : " + error);
+                    Debug.LogWarning($"#[VRBridge] SteamVR non disponible : {error} (nouvelle tentative dans {InitRetryCooldown:0}s).");
+                    _initFailLogged = true;
                 }
             }
-            
-            
-            
+
             return _system;
+        }
+
+        /// <summary>
+        /// Renvoie les poses de tous les devices, pollées UNE SEULE FOIS par frame (partagées).
+        /// null si aucune session VR. À utiliser par tous les ItemTracking au lieu de poller
+        /// chacun de leur côté.
+        /// </summary>
+        public static TrackedDevicePose_t[] GetPosesThisFrame()
+        {
+            var sys = GetSystem();
+            if (sys == null) return null;
+
+            if (_posesFrame != Time.frameCount)
+            {
+                _posesFrame = Time.frameCount;
+                sys.GetDeviceToAbsoluteTrackingPose(
+                    ETrackingUniverseOrigin.TrackingUniverseStanding, 0, _sharedPoses);
+            }
+            return _sharedPoses;
         }
 
         public static bool IsShuttingDown { get; private set; } = false;
@@ -79,6 +117,9 @@ namespace VaroniaBackOffice
         static void ResetState()
         {
             IsShuttingDown = false;
+            _nextInitAttempt = 0f;   // re-tentative immédiate au début d'une nouvelle session
+            _initFailLogged  = false;
+            _posesFrame      = -1;
         }
 
 #if UNITY_EDITOR
