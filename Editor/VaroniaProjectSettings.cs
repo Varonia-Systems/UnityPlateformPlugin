@@ -354,16 +354,6 @@ namespace VaroniaBackOffice
                             MessageType.Info
                         );
                     }
-
-                    GUILayout.Space(6);
-                    DrawSeparator(ColorSeparator);
-                    GUILayout.Space(6);
-
-                    var weaponProp = so.FindProperty("weaponCount");
-                    EditorGUILayout.PropertyField(weaponProp, new GUIContent(
-                        "Weapon Count",
-                        "Number of simultaneous Varonia weapons (devices). Each weapon creates its own VaroniaDevice in the Input System."
-                    ));
                 }
             );
 

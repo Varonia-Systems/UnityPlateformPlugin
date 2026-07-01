@@ -25,15 +25,24 @@ namespace VBO_Ultimate.Runtime.Scripts.Input
         public void RemoveForceLost() { if (_forceLostCounter > 0) _forceLostCounter--; }
 
         private void OnEnable()  { s_active.Add(this); }
-        private void OnDisable() { s_active.Remove(this); _forceLostCounter = 0; }
+        private void OnDisable()
+        {
+            s_active.Remove(this);
+            _forceLostCounter = 0;
+            // Libère l'entrée réclamée pour qu'un futur spawn puisse la reprendre.
+            if (weaponIndex >= 0) { VaroniaWeaponRegistry.Release(weaponIndex); weaponIndex = -1; }
+        }
 
-        [Header("Weapon Index")]
-        [Tooltip("Index de cette arme dans VaroniaInput (0 = première arme, 1 = deuxième, etc.).")]
-        public int weaponIndex = 0;
+        // Slot runtime attribué au Start par VaroniaWeaponRegistry (position parmi les papas).
+        // -1 = pas encore réclamé. N'est PLUS authoré dans l'inspector.
+        public int weaponIndex { get; private set; } = -1;
 
-        [Header("Force ID")]
+        [Header("Sélection de l'arme")]
+        [Tooltip("Si coché : cette arme prend le Controller choisi ci-dessous (1er papa non réclamé de ce type). " +
+                 "Sinon : le device IsDefault, à défaut le premier papa libre de la liste.")]
         public bool forceId = false;
-        public int forcedId = 0;
+        [Tooltip("Controller ciblé quand 'forceId' est coché.")]
+        public Controller forcedController = Controller.Unknown;
 
         [Header("Tracker")]
         public ItemTracking trackerFollower;
@@ -71,44 +80,63 @@ namespace VBO_Ultimate.Runtime.Scripts.Input
         private IEnumerator Start()
         {
             yield return new WaitUntil(() => VaroniaWeapon.Instance != null);
+            yield return new WaitUntil(() => BackOfficeVaronia.Instance != null && BackOfficeVaronia.Instance.config != null);
 
-            int controllerId;
-
-            if (forceId)
+            // ── Réclame une arme (papa) dans le registry → slot stable + binding ──
+            int slot = VaroniaWeaponRegistry.Claim(forceId, forcedController);
+            if (slot < 0)
             {
-                controllerId = forcedId;
-                Debug.Log($"[VaroniaWeaponTracking] Force ID enabled — using ID: {controllerId}");
+                string what = forceId ? $"du Controller {forcedController}" : "libre";
+                BackOfficeVaronia.ReportError($"Aucune arme {what} disponible dans GlobalConfig.Devices pour cette arme de scène ('{name}').");
+                yield break;
             }
-            else
+            weaponIndex = slot;
+
+            // Alloue le slot d'input (grandit les tableaux + crée le device new-input-system).
+            VaroniaInput.EnsureWeapon(slot);
+
+            var binding = VaroniaWeaponRegistry.GetParent(slot);
+            int controllerId = (int)binding.Controller;
+
+            // ── Tracker enfant (suivi) ──
+            //   • ForceSteamId >= 0 → SteamVR par index (autoFind off).
+            //   • sinon Identifier renseigné → SteamVR par serial (autoFind + filtre serial).
+            //   • sinon (-1 ET pas d'Identifier) → ancien système : auto-find, prend le 1er tracker.
+            var tracker = VaroniaWeaponRegistry.GetTracker(slot);
+            if (tracker != null)
             {
-                yield return new WaitUntil(() => BackOfficeVaronia.Instance != null && BackOfficeVaronia.Instance.config != null);
-
-                // Nouveau système multi-armes : on prend le binding à l'index correspondant.
-                // Si la liste est vide, GetWeaponBinding retombe sur l'ancien Controller (arme 0).
-                var binding = BackOfficeVaronia.Instance.config.GetWeaponBinding(weaponIndex);
-                if (binding != null)
-                {
-                    controllerId = (int)binding.Controller;
-
-                    // Si ForceSteamId est défini (>= 0), on force le tracking SteamVR par index.
-                    // Ça écrase les overrides Inspector au runtime — ApplyTrackerSettings les utilisera.
-                    if (binding.ForceSteamId >= 0)
-                    {
-                        overrideAutoFind        = true;
-                        overriddenBackend       = ItemTracking.TrackingBackend.SteamVR;
+                overrideAutoFind  = true;
+                overriddenBackend = ItemTracking.TrackingBackend.SteamVR;
 #if STEAMVR_ENABLED
-                        overriddenTrackerIndex  = binding.ForceSteamId;
-                        Debug.Log($"[VaroniaWeaponTracking] weaponIndex={weaponIndex} : override SteamVR trackerIndex={binding.ForceSteamId} depuis GlobalConfig.Devices.");
-#else
-                        Debug.LogWarning($"[VaroniaWeaponTracking] weaponIndex={weaponIndex} : ForceSteamId={binding.ForceSteamId} défini mais STEAMVR_ENABLED off — ignoré.");
-#endif
-                    }
+                if (tracker.ForceSteamId >= 0)
+                {
+                    overriddenAutoFind        = false; // index précis → pas de scan
+                    overriddenUseSerialFilter = false;
+                    overriddenTrackerIndex    = tracker.ForceSteamId;
+                    Debug.Log($"[VaroniaWeaponTracking] slot={slot} : tracker SteamVR par index {tracker.ForceSteamId}.");
+                }
+                else if (!string.IsNullOrEmpty(tracker.Identifier))
+                {
+                    overriddenAutoFind        = true;  // FindTracker() ne tourne que si autoFind == true
+                    overriddenUseSerialFilter = true;
+                    overriddenTargetSerial    = tracker.Identifier;
+                    Debug.Log($"[VaroniaWeaponTracking] slot={slot} : tracker SteamVR par serial '{tracker.Identifier}'.");
                 }
                 else
                 {
-                    Debug.LogWarning($"[VaroniaWeaponTracking] Aucun WeaponBinding pour weaponIndex={weaponIndex} — vérifie GlobalConfig.Devices.");
-                    controllerId = (int)BackOfficeVaronia.Instance.config.Controller;
+                    // Ancien système : auto-find du premier tracker (aucune erreur).
+                    overriddenAutoFind        = true;
+                    overriddenUseSerialFilter = false;
+                    Debug.Log($"[VaroniaWeaponTracking] slot={slot} : tracker SteamVR auto-find (premier tracker).");
                 }
+#else
+                if (tracker.ForceSteamId >= 0)
+                    Debug.LogWarning($"[VaroniaWeaponTracking] slot={slot} : ForceSteamId défini mais STEAMVR_ENABLED off — ignoré.");
+#endif
+            }
+            else
+            {
+                BackOfficeVaronia.ReportError($"Tracker introuvable pour l'arme #{slot} ({binding.Controller}). Ajoute un enfant tracker (LinkParent = Identifier de l'arme) dans GlobalConfig.Devices.");
             }
 
             _WeaponInfo entry = VaroniaWeapon.Instance.GetWeaponById(controllerId);

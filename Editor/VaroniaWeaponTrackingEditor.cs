@@ -152,9 +152,8 @@ namespace VaroniaBackOffice
             serializedObject.Update();
 
             var script   = (VaroniaWeaponTracking)target;
-            var propWeaponIndex = serializedObject.FindProperty("weaponIndex");
             var propForceId  = serializedObject.FindProperty("forceId");
-            var propForcedId = serializedObject.FindProperty("forcedId");
+            var propForcedController = serializedObject.FindProperty("forcedController");
 
             bool isForced = propForceId.boolValue;
 
@@ -174,56 +173,47 @@ namespace VaroniaBackOffice
 
             GUILayout.Space(12);
 
-            // ── Weapon Index card ──
+            // ── Sélection de l'arme card ──
             DrawCard(() =>
             {
-                DrawSectionLabel("WEAPON INDEX");
+                DrawSectionLabel("SÉLECTION DE L'ARME");
                 DrawDivider();
                 GUILayout.Space(6);
 
                 EditorGUILayout.BeginHorizontal();
-                GUILayout.Label("Weapon Index", fieldLabelStyle, GUILayout.Width(140));
-                EditorGUILayout.PropertyField(propWeaponIndex, GUIContent.none);
-                EditorGUILayout.EndHorizontal();
-
-                GUILayout.Space(2);
-                EditorGUILayout.BeginHorizontal();
-                GUILayout.Space(140);
-                GUILayout.Label("Slot Input System (0 = première arme)", readOnlyStyle);
-                EditorGUILayout.EndHorizontal();
-
-            }, colAccent);
-
-            GUILayout.Space(8);
-
-            // ── Spawn Source card ──
-            DrawCard(() =>
-            {
-                DrawSectionLabel("SPAWN SOURCE");
-                DrawDivider();
-                GUILayout.Space(6);
-
-                EditorGUILayout.BeginHorizontal();
-                GUILayout.Label("Force Specific ID", fieldLabelStyle, GUILayout.Width(140));
+                GUILayout.Label("Force Controller", fieldLabelStyle, GUILayout.Width(140));
                 EditorGUILayout.PropertyField(propForceId, GUIContent.none);
                 EditorGUILayout.EndHorizontal();
 
                 if (isForced)
                 {
+                    // Coché → dropdown Controller ciblé.
                     GUILayout.Space(4);
                     EditorGUILayout.BeginHorizontal();
-                    GUILayout.Label("Forced ID", fieldLabelStyle, GUILayout.Width(140));
-                    EditorGUILayout.PropertyField(propForcedId, GUIContent.none);
+                    GUILayout.Label("Controller", fieldLabelStyle, GUILayout.Width(140));
+                    EditorGUILayout.PropertyField(propForcedController, GUIContent.none);
+                    EditorGUILayout.EndHorizontal();
+                    GUILayout.Space(2);
+                    EditorGUILayout.BeginHorizontal();
+                    GUILayout.Space(140);
+                    GUILayout.Label("1ᵉʳ papa non réclamé de ce Controller", readOnlyStyle);
                     EditorGUILayout.EndHorizontal();
                 }
                 else
                 {
                     GUILayout.Space(4);
                     EditorGUILayout.BeginHorizontal();
-                    GUILayout.Label("Controller ID", fieldLabelStyle, GUILayout.Width(140));
-                    GUILayout.Label("From BackOfficeVaronia.config", readOnlyStyle);
+                    GUILayout.Space(140);
+                    GUILayout.Label("Prend le device IsDefault, sinon le 1ᵉʳ papa libre", readOnlyStyle);
                     EditorGUILayout.EndHorizontal();
                 }
+
+                // Slot runtime attribué (lecture seule, utile en Play).
+                GUILayout.Space(6);
+                EditorGUILayout.BeginHorizontal();
+                GUILayout.Label("Slot runtime", fieldLabelStyle, GUILayout.Width(140));
+                GUILayout.Label(script.weaponIndex >= 0 ? script.weaponIndex.ToString() : "— (non réclamé)", readOnlyStyle);
+                EditorGUILayout.EndHorizontal();
 
             }, isForced ? colWarn : colAccent);
 

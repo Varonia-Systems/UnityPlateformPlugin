@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Text;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using UnityEditor;
 using UnityEngine;
 using uPLibrary.Networking.M2Mqtt;
@@ -10,13 +11,18 @@ using uPLibrary.Networking.M2Mqtt.Messages;
 
 namespace VaroniaBackOffice
 {
-    public class MQTTWeaponFinderWindow : EditorWindow
+    public class DeviceMQTTIdentifierFinder : EditorWindow
     {
         private string _brokerAddress = "localhost";
         private MqttClient _client;
         private bool _isScanning = false;
         private string _foundMac = "";
         private Dictionary<string, (bool primary, bool secondary)> _deviceStates = new Dictionary<string, (bool, bool)>();
+
+        // ── Devices cibles (depuis GlobalConfig.Devices) : on écrit le MAC trouvé dans l'Identifier du device choisi ──
+        private string[] _deviceLabels = new string[0];
+        private int      _deviceCount  = 0;
+        private int      _selectedDeviceIndex = 0;
 
         // ── Mode de détection ──
         private enum FindMode { PrimarySecondary = 0, PrimaryOnly = 1 }
@@ -41,40 +47,68 @@ namespace VaroniaBackOffice
         private GUIStyle _labelStyle;
         private bool _stylesInitialized = false;
 
-        [MenuItem("Varonia/Find MQTT Weapon")]
+        [MenuItem("Varonia/Find Device MQTT Identifier")]
         public static void ShowWindow()
         {
-            var window = GetWindow<MQTTWeaponFinderWindow>("MQTT Weapon Finder");
+            var window = GetWindow<DeviceMQTTIdentifierFinder>("Device MQTT Identifier Finder");
             window.minSize = new Vector2(350, 250);
             window.Show();
         }
 
-        [MenuItem("Varonia/Find MQTT Weapon", true)]
+        [MenuItem("Varonia/Find Device MQTT Identifier", true)]
         public static bool ValidateShowWindow()
         {
-            try
-            {
-                // On réutilise la logique de chemin de LoadBrokerAddress
-                string rootPath = UnityEngine.Application.persistentDataPath.Replace(UnityEngine.Application.companyName + "/" + UnityEngine.Application.productName, "Varonia");
-                string configPath = Path.Combine(rootPath, "GlobalConfig.json");
+            try { return File.Exists(GetConfigPath()); }
+            catch { return false; }
+        }
 
-                if (!File.Exists(configPath)) return false;
-
-                string jsonContent = File.ReadAllText(configPath);
-                var cfg = JsonConvert.DeserializeObject<Dictionary<string, object>>(jsonContent);
-                
-                return cfg != null && cfg.ContainsKey("WeaponMAC");
-            }
-            catch
-            {
-                return false;
-            }
+        // Chemin du GlobalConfig.json actif (dossier Varonia).
+        private static string GetConfigPath()
+        {
+            string rootPath = Application.persistentDataPath.Replace(
+                Application.companyName + "/" + Application.productName, "Varonia");
+            return Path.Combine(rootPath, "GlobalConfig.json");
         }
 
         private void OnEnable()
         {
             LoadBrokerAddress();
+            LoadDevices();
             _stylesInitialized = false;
+        }
+
+        // Charge la liste GlobalConfig.Devices pour alimenter le dropdown de sélection.
+        private void LoadDevices()
+        {
+            _deviceLabels = new string[0];
+            _deviceCount  = 0;
+            try
+            {
+                string configPath = GetConfigPath();
+                if (!File.Exists(configPath)) return;
+
+                var root = JObject.Parse(File.ReadAllText(configPath));
+                if (!(root["Devices"] is JArray devices)) return;
+
+                _deviceCount  = devices.Count;
+                _deviceLabels = new string[devices.Count];
+                for (int i = 0; i < devices.Count; i++)
+                {
+                    var d = devices[i] as JObject;
+                    string ctrlName = d?["Controller"]?.ToString() ?? "?";
+                    if (int.TryParse(ctrlName, out int cv) && Enum.IsDefined(typeof(Controller), cv))
+                        ctrlName = ((Controller)cv).ToString();
+                    string id = d?["Identifier"]?.ToString() ?? "";
+                    _deviceLabels[i] = string.IsNullOrEmpty(id)
+                        ? $"#{i}  {ctrlName}"
+                        : $"#{i}  {ctrlName}  ({id})";
+                }
+                if (_selectedDeviceIndex >= _deviceCount) _selectedDeviceIndex = 0;
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning($"[DeviceMQTTIdentifierFinder] Lecture des Devices impossible : {e.Message}");
+            }
         }
 
         private void OnDisable()
@@ -109,7 +143,7 @@ namespace VaroniaBackOffice
             }
             catch (Exception e)
             {
-                Debug.LogWarning($"[MQTTWeaponFinder] Could not load MQTT_ServerIP from file: {e.Message}");
+                Debug.LogWarning($"[DeviceMQTTIdentifierFinder] Could not load MQTT_ServerIP from file: {e.Message}");
             }
         }
 
@@ -167,11 +201,34 @@ namespace VaroniaBackOffice
 
             EditorGUILayout.BeginVertical();
             
-            GUILayout.Label("MQTT WEAPON FINDER", _headerStyle);
+            GUILayout.Label("DEVICE MQTT IDENTIFIER FINDER", _headerStyle);
 
             EditorGUILayout.BeginVertical(_cardStyle);
             
             EditorGUILayout.LabelField("Broker IP:", _brokerAddress, EditorStyles.boldLabel);
+            GUILayout.Space(5);
+
+            // ── Device cible : où écrire le MAC trouvé (Identifier) ──
+            using (new EditorGUI.DisabledScope(_isScanning))
+            {
+                EditorGUILayout.BeginHorizontal();
+                if (_deviceCount > 0)
+                {
+                    _selectedDeviceIndex = EditorGUILayout.Popup("Device cible", _selectedDeviceIndex, _deviceLabels);
+                }
+                else
+                {
+                    EditorGUILayout.LabelField("Device cible", "— aucun —");
+                }
+                if (GUILayout.Button("↻", GUILayout.Width(26), GUILayout.Height(18))) LoadDevices();
+                EditorGUILayout.EndHorizontal();
+            }
+            if (_deviceCount == 0)
+            {
+                EditorGUILayout.HelpBox(
+                    "Aucun device dans GlobalConfig.Devices. Ajoute au moins une arme dans l'éditeur GlobalConfig, puis ↻.",
+                    MessageType.Warning);
+            }
             GUILayout.Space(5);
 
             // ── Mode de détection (verrouillé pendant le scan) ──
@@ -198,10 +255,13 @@ namespace VaroniaBackOffice
 
             if (!_isScanning)
             {
-                GUI.backgroundColor = colAccent;
-                if (GUILayout.Button("START SCAN", _buttonStyle))
+                using (new EditorGUI.DisabledScope(_deviceCount == 0))
                 {
-                    StartScan();
+                    GUI.backgroundColor = colAccent;
+                    if (GUILayout.Button("START SCAN", _buttonStyle))
+                    {
+                        StartScan();
+                    }
                 }
             }
             else
@@ -217,7 +277,7 @@ namespace VaroniaBackOffice
             if (!string.IsNullOrEmpty(_foundMac))
             {
                 GUILayout.Space(10);
-                EditorGUILayout.HelpBox($"SUCCESS! Found and assigned MAC: {_foundMac}", MessageType.Info);
+                EditorGUILayout.HelpBox($"SUCCESS! MAC {_foundMac} assigné au device sélectionné (Identifier).", MessageType.Info);
             }
 
             EditorGUILayout.EndVertical();
@@ -246,12 +306,12 @@ namespace VaroniaBackOffice
                 {
                     _client.Subscribe(new string[] { "DeviceToUnity/#" }, new byte[] { MqttMsgBase.QOS_LEVEL_AT_LEAST_ONCE });
                     _isScanning = true;
-                    Debug.Log($"[MQTTWeaponFinder] Connected to {_brokerAddress} and scanning...");
+                    Debug.Log($"[DeviceMQTTIdentifierFinder] Connected to {_brokerAddress} and scanning...");
                 }
             }
             catch (Exception e)
             {
-                Debug.LogError($"[MQTTWeaponFinder] Connection failed: {e.Message}");
+                Debug.LogError($"[DeviceMQTTIdentifierFinder] Connection failed: {e.Message}");
                 _isScanning = false;
             }
         }
@@ -310,40 +370,42 @@ namespace VaroniaBackOffice
 
         private void ApplyFoundMac(string mac)
         {
-            Debug.Log($"[MQTTWeaponFinder] Weapon Detected: {mac}. Saving to config...");
+            Debug.Log($"[DeviceMQTTIdentifierFinder] Weapon Detected: {mac}. Écriture dans le device sélectionné...");
 
             try
             {
-                string rootPath = Application.persistentDataPath.Replace(Application.companyName + "/" + Application.productName, "Varonia");
-                string configPath = Path.Combine(rootPath, "GlobalConfig.json");
-
-                Dictionary<string, object> configData;
-                if (File.Exists(configPath))
+                string configPath = GetConfigPath();
+                if (!File.Exists(configPath))
                 {
-                    string jsonContent = File.ReadAllText(configPath);
-                    configData = JsonConvert.DeserializeObject<Dictionary<string, object>>(jsonContent) ?? new Dictionary<string, object>();
-                }
-                else
-                {
-                    configData = new Dictionary<string, object>();
+                    Debug.LogError($"[DeviceMQTTIdentifierFinder] GlobalConfig.json introuvable : {configPath}");
+                    StopScan(); Repaint(); return;
                 }
 
-                configData["WeaponMAC"] = mac;
-                
-                string newJson = JsonConvert.SerializeObject(configData, Formatting.Indented);
-                File.WriteAllText(configPath, newJson);
-                
-                Debug.Log($"[MQTTWeaponFinder] WeaponMAC saved to {configPath}");
-                
+                var root = JObject.Parse(File.ReadAllText(configPath));
+                if (!(root["Devices"] is JArray devices) ||
+                    _selectedDeviceIndex < 0 || _selectedDeviceIndex >= devices.Count ||
+                    !(devices[_selectedDeviceIndex] is JObject target))
+                {
+                    Debug.LogError($"[DeviceMQTTIdentifierFinder] Device #{_selectedDeviceIndex} introuvable dans GlobalConfig.Devices — MAC non écrit.");
+                    StopScan(); Repaint(); return;
+                }
+
+                target["Identifier"] = mac;
+
+                File.WriteAllText(configPath, root.ToString(Formatting.Indented));
+                Debug.Log($"[DeviceMQTTIdentifierFinder] Identifier '{mac}' assigné au device #{_selectedDeviceIndex} → {configPath}");
+
                 // Si on est en mode Play, on met à jour l'instance
                 if (Application.isPlaying && BackOfficeVaronia.Instance != null)
                 {
                     BackOfficeVaronia.Instance.LoadConfig();
                 }
+
+                LoadDevices(); // rafraîchit les labels (l'Identifier apparaît maintenant)
             }
             catch (Exception e)
             {
-                Debug.LogError($"[MQTTWeaponFinder] Failed to save MAC: {e.Message}");
+                Debug.LogError($"[DeviceMQTTIdentifierFinder] Échec écriture Identifier : {e.Message}");
             }
 
             StopScan();

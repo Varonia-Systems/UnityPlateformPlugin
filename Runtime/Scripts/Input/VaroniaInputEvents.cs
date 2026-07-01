@@ -63,24 +63,19 @@ namespace VBO_Ultimate.Runtime.Scripts.Input
         {
             if (!matchByController) yield break;
 
-            // Résolution par Controller : on attend la config puis on prend le 1er device qui matche.
+            // Résolution par Controller : on attend la config puis on prend le slot (position parmi
+            // les papas) de la 1ʳᵉ arme qui matche — même index que celui utilisé par VaroniaInput.
             yield return new WaitUntil(() => BackOfficeVaronia.Instance != null && BackOfficeVaronia.Instance.config != null);
 
-            var devices = BackOfficeVaronia.Instance.config.Devices;
-            if (devices != null)
+            int slot = VaroniaWeaponRegistry.IndexOfController(controller);
+            if (slot >= 0)
             {
-                for (int i = 0; i < devices.Count; i++)
-                {
-                    if (devices[i] != null && devices[i].Controller == controller)
-                    {
-                        ResolvedIndex = i;
-                        Resolved      = true;
-                        yield break;
-                    }
-                }
+                ResolvedIndex = slot;
+                Resolved      = true;
+                yield break;
             }
 
-            Debug.LogWarning($"[VaroniaInputEvents] Aucun device avec Controller={controller} dans GlobalConfig.Devices.");
+            Debug.LogWarning($"[VaroniaInputEvents] Aucune arme (papa) avec Controller={controller} dans GlobalConfig.Devices.");
         }
 
         private void OnButtonChanged(int idx, VaroniaButton button, bool pressed)

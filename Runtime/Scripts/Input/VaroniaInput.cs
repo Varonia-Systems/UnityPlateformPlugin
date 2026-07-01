@@ -407,17 +407,12 @@ namespace VaroniaBackOffice
             Instance = this;
             DontDestroyOnLoad(gameObject);
 
-            // Lire le nombre d'armes depuis VaroniaRuntimeSettings
-            int count = 1;
-            var settings = VaroniaRuntimeSettings.Load();
-            if (settings != null) count = Mathf.Max(1, settings.weaponCount);
-
-            InitWeapons(count);
+            // Plus de weaponCount fixe : les slots sont alloués dynamiquement quand une arme
+            // se réclame (VaroniaWeaponTracking → VaroniaInput.EnsureWeapon). On démarre vide.
+            InitWeapons(0);
 
 #if ENABLE_INPUT_SYSTEM
             VaroniaDevice.RegisterLayout();
-            for (int i = 0; i < WeaponCount; i++)
-                VaroniaDevice.CreateDevice(i);
 #endif
         }
 
@@ -452,6 +447,40 @@ namespace VaroniaBackOffice
                 _lastStates[i] = new bool[4];
                 _lastFrame[i]  = -1;
             }
+        }
+
+        /// <summary>
+        /// Garantit que le slot <paramref name="index"/> existe : agrandit les tableaux au besoin
+        /// (en préservant les données), puis crée le device new-input-system associé.
+        /// Appelé par VaroniaWeaponTracking quand une arme réclame son slot.
+        /// </summary>
+        public static void EnsureWeapon(int index)
+        {
+            if (index < 0) return;
+
+            if (index >= WeaponCount)
+            {
+                int newCount = index + 1;
+                System.Array.Resize(ref _states,      newCount);
+                System.Array.Resize(ref _lastStates,  newCount);
+                System.Array.Resize(ref _lastFrame,   newCount);
+                System.Array.Resize(ref _isConnected, newCount);
+                System.Array.Resize(ref _battery,     newCount);
+                System.Array.Resize(ref _rssi,        newCount);
+                System.Array.Resize(ref _bootTime,    newCount);
+                System.Array.Resize(ref _model,       newCount);
+                for (int i = WeaponCount; i < newCount; i++)
+                {
+                    _states[i]     = new bool[4];
+                    _lastStates[i] = new bool[4];
+                    _lastFrame[i]  = -1;
+                }
+                WeaponCount = newCount;
+            }
+
+#if ENABLE_INPUT_SYSTEM
+            VaroniaDevice.CreateDevice(index);
+#endif
         }
 
         /// <summary>

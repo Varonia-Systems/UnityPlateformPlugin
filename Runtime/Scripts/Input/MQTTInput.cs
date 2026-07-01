@@ -13,7 +13,7 @@ namespace VBO_Ultimate.Runtime.Scripts.Input
     ///
     /// Au lieu de se baser sur le weaponIndex, ce composant cherche dans
     /// <c>GlobalConfig.Devices</c> le PREMIER binding dont le <see cref="Controller"/>
-    /// correspond à <see cref="controller"/>, et s'abonne à son SerialNumber (MAC).
+    /// correspond à <see cref="controller"/>, et s'abonne à son Identifier (MAC).
     /// Le weaponIndex utilisé pour VaroniaInput = l'index de ce device dans la liste.
     /// </summary>
     public class MQTTInput : MonoBehaviour
@@ -28,7 +28,7 @@ namespace VBO_Ultimate.Runtime.Scripts.Input
         public int WeaponIndex => _weaponIndex;
         /// <summary>True une fois le device trouvé et l'abonnement MQTT effectué.</summary>
         public bool Resolved { get; private set; }
-        /// <summary>SerialNumber (MAC) du device résolu, ou vide.</summary>
+        /// <summary>Identifier (MAC) du device résolu, ou vide.</summary>
         public string Mac => _mac;
 
         private readonly ConcurrentQueue<Action> _mainThreadQueue = new ConcurrentQueue<Action>();
@@ -39,35 +39,24 @@ namespace VBO_Ultimate.Runtime.Scripts.Input
             yield return new WaitUntil(() => BackOfficeVaronia.Instance.mqttClient != null
                                           && BackOfficeVaronia.Instance.mqttClient.client != null);
 
-            var cfg = BackOfficeVaronia.Instance.config;
-
-            // ── Premier device qui matche le Controller choisi ──
-            int foundIndex = -1;
-            if (cfg.Devices != null)
-            {
-                for (int i = 0; i < cfg.Devices.Count; i++)
-                {
-                    if (cfg.Devices[i] != null && cfg.Devices[i].Controller == controller)
-                    {
-                        foundIndex = i;
-                        _mac       = cfg.Devices[i].SerialNumber;
-                        break;
-                    }
-                }
-            }
-
+            // ── Slot (position parmi les papas) du premier device qui matche le Controller ──
+            int foundIndex = VaroniaWeaponRegistry.IndexOfController(controller);
             if (foundIndex < 0)
             {
-                Debug.LogWarning($"[MQTTInput] Aucun device avec Controller={controller} dans GlobalConfig.Devices.");
+                Debug.LogWarning($"[MQTTInput] Aucune arme (papa) avec Controller={controller} dans GlobalConfig.Devices.");
                 yield break;
             }
+
+            var binding = VaroniaWeaponRegistry.GetParent(foundIndex);
+            _mac = binding != null ? binding.Identifier : null;
             if (string.IsNullOrEmpty(_mac))
             {
-                Debug.LogWarning($"[MQTTInput] Device Controller={controller} (index {foundIndex}) sans SerialNumber — abandon.");
+                Debug.LogWarning($"[MQTTInput] Arme Controller={controller} (slot {foundIndex}) sans Identifier — abandon.");
                 yield break;
             }
 
             _weaponIndex = foundIndex;
+            VaroniaInput.EnsureWeapon(_weaponIndex);
 
             Debug.Log($"[MQTTInput] Subscribe to {_mac} (Controller={controller}, weaponIndex={_weaponIndex})");
             BackOfficeVaronia.Instance.mqttClient.client.Subscribe(

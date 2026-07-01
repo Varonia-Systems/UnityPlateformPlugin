@@ -33,18 +33,14 @@ namespace VBO_Ultimate.Runtime.Scripts.Input
             yield return new WaitUntil(() => BackOfficeVaronia.Instance.mqttClient != null);
             yield return new WaitUntil(() => BackOfficeVaronia.Instance.mqttClient.client != null);
 
-            // Nouveau système multi-armes : on prend le SerialNumber du binding à cet index.
-            // Si la liste GlobalConfig.Devices est vide, GetWeaponBinding retombe sur la clé JSON "WeaponMAC" (arme 0).
+            // Système multi-armes : on prend l'Identifier du binding à cet index dans GlobalConfig.Devices.
             var binding = BackOfficeVaronia.Instance.config.GetWeaponBinding(_weaponIndex);
-            if (binding != null && !string.IsNullOrEmpty(binding.SerialNumber))
+            if (binding == null || string.IsNullOrEmpty(binding.Identifier))
             {
-                MacAdress = binding.SerialNumber;
+                Debug.LogWarning($"[MQTT_Weapon] Aucun Identifier pour weaponIndex={_weaponIndex} dans GlobalConfig.Devices — abonnement MQTT ignoré.");
+                yield break;
             }
-            else
-            {
-                Debug.LogWarning($"[MQTT_Weapon] Aucun SerialNumber pour weaponIndex={_weaponIndex} — fallback sur la clé JSON 'WeaponMAC'.");
-                MacAdress = BackOfficeVaronia.Instance.GetConfigField<string>("WeaponMAC");
-            }
+            MacAdress = binding.Identifier;
 
             Debug.Log($"[MQTT_Weapon] Subscribe to: {MacAdress} (weaponIndex={_weaponIndex})");
 

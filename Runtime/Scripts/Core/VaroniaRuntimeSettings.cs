@@ -60,13 +60,6 @@ namespace VaroniaBackOffice
         public bool autoInit = true;
 
         /// <summary>
-        /// Nombre d'armes (devices) Varonia simultanées.
-        /// Chaque arme crée son propre VaroniaDevice dans le New Input System.
-        /// </summary>
-        [Min(1)]
-        public int weaponCount = 1;
-
-        /// <summary>
         /// Version du package, copiée automatiquement depuis package.json par VaroniaPackageWiring.
         /// Accessible en build via Resources.
         /// </summary>

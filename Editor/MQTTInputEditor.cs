@@ -143,7 +143,7 @@ namespace VaroniaBackOffice
                     if (c.HasValue && c.Value == ctrlVal)
                     {
                         foundIndex  = i;
-                        foundSerial = devices[i]?["SerialNumber"]?.Value<string>();
+                        foundSerial = devices[i]?["Identifier"]?.Value<string>();
                         break;
                     }
                 }

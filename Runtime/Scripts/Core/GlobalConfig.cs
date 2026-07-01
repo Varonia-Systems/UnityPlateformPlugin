@@ -13,17 +13,27 @@ namespace VaroniaBackOffice
     
     public enum Controller
     {
-        Unknown = -1,
-        PICO_VSVR_CTRL = 6,
+        FOCUS3_VBS_CTRL = 4,
         FOCUS3_VBS_VaroniaGun = 3,
-        FOCUS3_VBS_Striker = 50,
         FOCUS3_VBS_HK416 = 101,
+        FOCUS3_VBS_Striker = 50,
+
+        HandTracking = 5,
+
+        PICO_VSVR_CTRL = 6,
+        TRACKER = 60,
         PICO_VSVR_VaroniaGun = 70,
         PICO_VSVR_Striker = 80,
         PICO_VSVR_HK416 = 416,
+
+        // Auto-detected VR controllers (per-side); reported by the dashboard.
+        LeftController = 61,
+        RightController = 62,
+
+        Unknown = -1,
         PICO_VSVR_Glock = 417,
         VORTEX_WEAPON_FOCUS = 501,
-        
+
         HMD = 777,
     }
 
@@ -39,11 +49,24 @@ namespace VaroniaBackOffice
         /// <summary> Identifiant du contrôleur / modèle d'arme. </summary>
         public Controller Controller = Controller.Unknown;
 
-        /// <summary> Numéro de série (adresse MAC ou autre identifiant unique). </summary>
-        public string SerialNumber = "";
+        /// <summary>
+        /// Identifiant unique du device : adresse MAC (abonnement MQTT) OU serial de tracking
+        /// (tracker SteamVR type 'LHR-XXXXXXXX', ID OpenXR, etc.).
+        /// Fusion des anciens champs SerialNumber + TrackingId.
+        /// </summary>
+        public string Identifier = "";
 
-        /// <summary> Identifiant de tracking (ex. serial du tracker SteamVR, ID OpenXR, etc.). </summary>
-        public string TrackingId = "";
+        /// <summary>
+        /// Marque cette arme comme celle par défaut. Un seul <see cref="WeaponBinding"/> de la liste
+        /// <see cref="GlobalConfig.Devices"/> peut être IsDefault à la fois (exclusivité gérée par l'éditeur).
+        /// </summary>
+        public bool IsDefault = false;
+
+        /// <summary>
+        /// Identifiant (<see cref="Identifier"/>) de l'arme "parent" de ce device.
+        /// Vide = pas de parent (racine). Permet de construire une hiérarchie parent → enfants.
+        /// </summary>
+        public string LinkParent = "";
 
         /// <summary> Force un Steam device index spécifique (-1 = pas de forçage / auto). </summary>
         public int ForceSteamId = -1;
@@ -90,66 +113,53 @@ namespace VaroniaBackOffice
         
         
         
-        [Header("Controller (legacy mono-arme)")]
         /// <summary>
-        /// Force l'ancien système mono-arme. Si vrai, <see cref="GetWeaponBinding"/> ignore
-        /// la liste <see cref="Devices"/> (même si elle est remplie) et utilise toujours
-        /// <see cref="Controller"/> + <see cref="WeaponMAC"/> (arme 0).
-        /// </summary>
-        public bool ForceLegacyController = false;
-
-        /// <summary>
-        /// Ancien système : type de contrôleur unique de l'arme 0.
-        /// Conservé pour rétrocompat — préférer <see cref="Devices"/> pour les nouveaux projets.
-        /// </summary>
-        public Controller Controller = 0;
-
-        /// <summary>
-        /// Ancien système : adresse MAC / numéro de série unique de l'arme 0.
-        /// Conservé pour rétrocompat — préférer <see cref="Devices"/> pour les nouveaux projets.
-        /// </summary>
-        public string WeaponMAC = "";
-
-        /// <summary>
-        /// Nouveau système multi-armes : liste typée d'armes, chacune avec son Controller et son SerialNumber.
-        /// L'index dans la liste correspond au weaponIndex (VaroniaInput / VaroniaWeaponTracking).
-        ///
-        /// Rétrocompat : si la liste est vide, on retombe sur l'ancien système
-        /// (<see cref="Controller"/> + clé JSON "WeaponMAC") via <see cref="GetWeaponBinding"/>.
+        /// Liste typée de devices. Un "papa" (racine, <see cref="WeaponBinding.LinkParent"/> vide)
+        /// = une arme. Un enfant (LinkParent renseigné) = son tracker de suivi.
+        /// L'index d'arme runtime NE correspond PAS à l'index dans cette liste : il est attribué
+        /// dynamiquement par <see cref="VaroniaWeaponRegistry"/> (position parmi les papas).
         /// </summary>
         [Header("Devices (multi-arme)")]
         public List<WeaponBinding> Devices = new List<WeaponBinding>();
 
-        /// <summary>
-        /// Résout l'arme à l'index donné.
-        /// - Si <see cref="ForceLegacyController"/> est vrai → on ignore <see cref="Devices"/>
-        ///   et on force l'ancien système (Controller + WeaponMAC, arme 0 uniquement).
-        /// - Sinon, si <see cref="Devices"/> contient une entrée à cet index → la renvoie.
-        /// - Sinon, pour weaponIndex == 0, retombe sur l'ancien système (Controller + WeaponMAC).
-        /// - Sinon, renvoie null.
-        /// </summary>
-        public WeaponBinding GetWeaponBinding(int weaponIndex)
+        /// <summary>Renvoie l'entrée <see cref="Devices"/> à l'index donné, ou null si hors bornes.</summary>
+        public WeaponBinding GetWeaponBinding(int index)
         {
-            // Forçage legacy : court-circuite la liste Devices même si elle est renseignée.
-            if (!ForceLegacyController && Devices != null && weaponIndex >= 0 && weaponIndex < Devices.Count)
-                return Devices[weaponIndex];
+            if (Devices != null && index >= 0 && index < Devices.Count)
+                return Devices[index];
 
-            if (weaponIndex == 0)
+            return null;
+        }
+
+        /// <summary>True si ce device est un "papa" (racine) : pas de <see cref="WeaponBinding.LinkParent"/>.</summary>
+        public static bool IsParent(WeaponBinding d) => d != null && string.IsNullOrEmpty(d.LinkParent);
+
+        /// <summary>
+        /// Renvoie l'arme par défaut : le premier papa <see cref="WeaponBinding.IsDefault"/>,
+        /// à défaut le premier papa de la liste. Null si aucun papa.
+        /// </summary>
+        public WeaponBinding GetDefaultWeapon()
+        {
+            if (Devices == null) return null;
+            WeaponBinding first = null;
+            foreach (var d in Devices)
             {
-                // Fallback ancien système : on lit les champs typés Controller + WeaponMAC.
-                // Si WeaponMAC est vide en typé, on tente quand même la lecture via réflexion
-                // (utile pour les vieux JSON où la clé existe mais comme "extra field").
-                string mac = this.WeaponMAC ?? "";
-                if (string.IsNullOrEmpty(mac) && BackOfficeVaronia.Instance != null)
-                    mac = BackOfficeVaronia.Instance.GetConfigField<string>("WeaponMAC") ?? "";
-
-                return new WeaponBinding
-                {
-                    Controller = this.Controller,
-                    SerialNumber = mac
-                };
+                if (!IsParent(d)) continue;
+                if (first == null) first = d;
+                if (d.IsDefault) return d;
             }
+            return first;
+        }
 
+        /// <summary>
+        /// Renvoie l'enfant tracker d'un papa : premier device dont <see cref="WeaponBinding.LinkParent"/>
+        /// vaut <paramref name="parentIdentifier"/>. Null si aucun.
+        /// </summary>
+        public WeaponBinding GetTrackerChild(string parentIdentifier)
+        {
+            if (string.IsNullOrEmpty(parentIdentifier) || Devices == null) return null;
+            foreach (var d in Devices)
+                if (d != null && d.LinkParent == parentIdentifier) return d;
             return null;
         }
 

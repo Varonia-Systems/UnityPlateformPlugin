@@ -419,14 +419,6 @@ namespace VaroniaBackOffice
 
         // ─── Known fields ─────────────────────────────────────────────────────────
 
-        // Nom des champs considérés comme "legacy" — affichés tout en bas avec un séparateur.
-        private static readonly HashSet<string> LegacyFieldNames = new HashSet<string>
-        {
-            "ForceLegacyController",
-            "Controller",
-            "WeaponMAC",
-        };
-
         // ─── Tooltips ─────────────────────────────────────────────────────────────
         // Centralisé ici pour pouvoir documenter chaque champ d'un coup d'œil.
         // La clé est le nom du field (reflection) → texte affiché au hover du label.
@@ -446,12 +438,7 @@ namespace VaroniaBackOffice
             { "Direct",     "Optional fast-path used after a crash or resync — skips some steps (depending on the game) to rejoin faster." },
 
             // Devices (multi-arme)
-            { "Devices", "Per-weapon binding list. Index in this list = weaponIndex used by VaroniaInput / VaroniaWeaponTracking. Leave empty to fall back to the legacy single-weapon system below." },
-
-            // Legacy
-            { "ForceLegacyController", "If checked, forces the legacy single-weapon system: the Devices list above is ignored (even if filled) and Controller + WeaponMAC (weapon 0) are always used." },
-            { "Controller", "Legacy: controller / weapon model for weapon 0. Ignored if Devices list above is non-empty." },
-            { "WeaponMAC",  "Legacy: MAC address / serial of weapon 0. Ignored if Devices list above is non-empty." },
+            { "Devices", "Per-weapon binding list. Index in this list = weaponIndex used by VaroniaInput / VaroniaWeaponTracking." },
 
             // VR
             { "HeadsetName", "Manual override for detected VR headset name (e.g. 'Pico 4 Ultra', 'Vive Focus 3'). Leave empty to auto-detect via OpenVR / OpenXR. Drives debug latency chart selection." },
@@ -462,53 +449,8 @@ namespace VaroniaBackOffice
 
         private void DrawKnownFields()
         {
-            // 1. Champs principaux
             foreach (var field in _knownFields)
-            {
-                if (LegacyFieldNames.Contains(field.Name)) continue;
                 DrawReflectedField(field);
-            }
-
-            // 2. Section "LEGACY" en bas (si au moins un champ legacy existe)
-            bool hasLegacy = false;
-            foreach (var f in _knownFields)
-                if (LegacyFieldNames.Contains(f.Name)) { hasLegacy = true; break; }
-
-            if (!hasLegacy) return;
-
-            EditorGUILayout.Space(10);
-
-            // Header LEGACY (warn-coloured pour bien marquer)
-            EditorGUILayout.BeginHorizontal();
-            var legacyHeaderStyle = new GUIStyle(sectionStyle);
-            legacyHeaderStyle.normal.textColor = colWarn;
-            GUILayout.Label(new GUIContent(
-                "LEGACY  ·  SINGLE WEAPON  (use Devices instead)",
-                "Old single-weapon fields, kept for backwards compatibility. Prefer the Devices list above for new projects."),
-                legacyHeaderStyle);
-            GUILayout.FlexibleSpace();
-            EditorGUILayout.EndHorizontal();
-
-            // Petit divider warn
-            Rect r = GUILayoutUtility.GetRect(1, 1);
-            r.x += 20;
-            r.width -= 40;
-            EditorGUI.DrawRect(r, new Color(colWarn.r, colWarn.g, colWarn.b, 0.25f));
-
-            EditorGUILayout.Space(4);
-
-            // 3. Champs legacy, dans un ordre explicite (toggle de forçage, puis Controller, puis WeaponMAC)
-            foreach (var name in new[] { "ForceLegacyController", "Controller", "WeaponMAC" })
-            {
-                foreach (var field in _knownFields)
-                {
-                    if (field.Name == name)
-                    {
-                        DrawReflectedField(field);
-                        break;
-                    }
-                }
-            }
         }
 
         private void DrawReflectedField(FieldInfo field)
@@ -581,51 +523,27 @@ namespace VaroniaBackOffice
                 _isDirty = true;
             }
 
-            // ── Header : nom + badge "X armes" (+ warning si mismatch avec VaroniaRuntimeSettings.weaponCount) ──
-            int expected = -1;
-            try
-            {
-                var settings = VaroniaRuntimeSettings.Load();
-                if (settings != null) expected = Mathf.Max(1, settings.weaponCount);
-            }
-            catch { /* settings absent : pas de check */ }
+            // Encadrement rouge léger autour de TOUT le bloc Devices.
+            Rect blockRect = EditorGUILayout.BeginVertical();
 
+            // ── Header : nom + badge de comptage ──
             EditorGUILayout.BeginHorizontal();
             GUILayout.Label(new GUIContent(field.Name, GetTooltip(field.Name)), fieldLabelStyle, GUILayout.Width(150));
 
-            string countLabel = $"  {list.Count} weapon{(list.Count > 1 ? "s" : "")}  ";
+            int parentCount = 0;
+            foreach (var d in list) if (GlobalConfig.IsParent(d)) parentCount++;
+            string countLabel = $"  {parentCount} weapon{(parentCount > 1 ? "s" : "")} · {list.Count} device{(list.Count > 1 ? "s" : "")}  ";
             var countStyle = new GUIStyle(badgeStyle);
-            GUILayout.Label(new GUIContent(countLabel, "Number of weapon bindings currently configured."), countStyle);
+            GUILayout.Label(new GUIContent(countLabel, "Papas (armes) · total devices (papas + trackers). L'index runtime = position parmi les papas."), countStyle);
 
-            if (expected > 0 && list.Count != expected && list.Count > 0)
+            if (list.Count == 0)
             {
-                var warnStyle = new GUIStyle(badgeStyle);
-                warnStyle.normal.textColor  = colWarn;
-                warnStyle.normal.background = MakeRoundedTex(32, 32, colWarnDim, 4);
+                var emptyStyle = new GUIStyle(badgeStyle);
+                emptyStyle.normal.textColor  = colTextSecond;
+                emptyStyle.normal.background = MakeRoundedTex(32, 32, new Color(0.4f, 0.4f, 0.4f, 0.15f), 4);
                 GUILayout.Label(new GUIContent(
-                    $"  ≠ RuntimeSettings ({expected})  ",
-                    "Mismatch: weapon count here doesn't match VaroniaRuntimeSettings.weaponCount. Sync them to avoid binding errors."), warnStyle);
-            }
-            else if (list.Count == 0)
-            {
-                var fallbackStyle = new GUIStyle(badgeStyle);
-                fallbackStyle.normal.textColor  = colTextSecond;
-                fallbackStyle.normal.background = MakeRoundedTex(32, 32, new Color(0.4f, 0.4f, 0.4f, 0.15f), 4);
-                GUILayout.Label(new GUIContent(
-                    "  empty → legacy system  ",
-                    "List is empty — the runtime will use the legacy Controller + WeaponMAC fields below for weapon 0."), fallbackStyle);
-            }
-
-            // Badge d'avertissement si le forçage legacy est actif : la liste est ignorée.
-            bool forceLegacy = (_configObj as GlobalConfig)?.ForceLegacyController ?? false;
-            if (forceLegacy)
-            {
-                var ignoredStyle = new GUIStyle(badgeStyle);
-                ignoredStyle.normal.textColor  = colWarn;
-                ignoredStyle.normal.background = MakeRoundedTex(32, 32, colWarnDim, 4);
-                GUILayout.Label(new GUIContent(
-                    "  IGNORED — ForceLegacyController ON  ",
-                    "ForceLegacyController is enabled below: this list is bypassed and the legacy Controller + WeaponMAC are used instead."), ignoredStyle);
+                    "  empty — no weapon configured  ",
+                    "List is empty — no weapon will be resolved. Add at least one device."), emptyStyle);
             }
 
             GUILayout.FlexibleSpace();
@@ -645,18 +563,20 @@ namespace VaroniaBackOffice
                 GUILayout.Label("",            colHeaderStyle, GUILayout.Width(30));
                 GUILayout.Label(new GUIContent("Controller",
                     "Weapon model / controller type for this slot. The numeric value in parentheses is the controller ID used by VaroniaWeapon to spawn the right prefab."), colHeaderStyle);
-                GUILayout.Label(new GUIContent("Serial",
-                    "Unique hardware identifier (MAC address, etc.) used to match this slot to a physical device. Leave empty if not needed."), colHeaderStyle);
-                GUILayout.Label(new GUIContent("Tracking ID",
-                    "Optional tracker identifier (SteamVR serial like 'LHR-XXXXXXXX', OpenXR device id, etc.). Mutually exclusive with 'Force Steam'."), colHeaderStyle);
+                GUILayout.Label(new GUIContent("Identifier",
+                    "Unique device id: MAC address (for MQTT) OR tracking serial (SteamVR 'LHR-XXXXXXXX', OpenXR device id, etc.). Merges the old Serial + Tracking ID. Mutually exclusive with 'Force Steam'."), colHeaderStyle);
                 GUILayout.Label("", colHeaderStyle, GUILayout.Width(24)); // espace pour le "OR"
                 GUILayout.Label(new GUIContent("Force Steam",
-                    "SteamVR device index override. -1 = auto (disabled), >= 0 = force this slot to track the SteamVR device at that index. Mutually exclusive with 'Tracking ID'."), colHeaderStyle, GUILayout.Width(70));
+                    "SteamVR device index override. -1 = auto (disabled), >= 0 = force this slot to track the SteamVR device at that index. Mutually exclusive with 'Identifier'."), colHeaderStyle, GUILayout.Width(70));
+                GUILayout.Label(new GUIContent("Parent",
+                    "Parent weapon of this device, referenced by its Identifier. Children are shown indented under their parent."), colHeaderStyle, GUILayout.Width(120));
+                GUILayout.Label(new GUIContent("Default",
+                    "Marks this weapon as the default one. Only a single entry can be default at a time."), colHeaderStyle, GUILayout.Width(48));
                 GUILayout.Label("",            colHeaderStyle, GUILayout.Width(24));
                 EditorGUILayout.EndHorizontal();
             }
 
-            // ── Lignes : [index] [Controller dropdown] [SerialNumber] [TrackingId] [✕] ──
+            // ── Lignes : [index] [Controller dropdown] [Identifier] [OR] [Force Steam] [Default] [✕] ──
             int toRemove = -1;
             var controllerValues = Enum.GetValues(typeof(Controller));
             var controllerNames  = Enum.GetNames(typeof(Controller));
@@ -667,16 +587,113 @@ namespace VaroniaBackOffice
                 controllerLabels[i] = $"{controllerNames[i]} ({iv})";
             }
 
-            for (int i = 0; i < list.Count; i++)
+            // ── Pré-calcul de la hiérarchie (parent via Identifier) ──────────────────
+            // Map Identifier -> index (première occurrence).
+            var idToIndex = new Dictionary<string, int>();
+            for (int k = 0; k < list.Count; k++)
+            {
+                var id = list[k]?.Identifier;
+                if (!string.IsNullOrEmpty(id) && !idToIndex.ContainsKey(id)) idToIndex[id] = k;
+            }
+            // Index du parent de chaque entrée (-1 = racine).
+            int[] parentIdx = new int[list.Count];
+            for (int k = 0; k < list.Count; k++)
+            {
+                parentIdx[k] = -1;
+                var pid = list[k]?.LinkParent;
+                if (!string.IsNullOrEmpty(pid) && idToIndex.TryGetValue(pid, out int pi) && pi != k)
+                    parentIdx[k] = pi;
+            }
+            // Profondeur (avec garde anti-cycle).
+            int[] depth = new int[list.Count];
+            for (int k = 0; k < list.Count; k++)
+            {
+                int d = 0, cur = parentIdx[k], guard = 0;
+                while (cur >= 0 && guard++ < list.Count) { d++; cur = parentIdx[cur]; }
+                depth[k] = d;
+            }
+            // Ordre d'affichage : DFS depuis les racines → enfants juste sous leur parent.
+            var displayOrder = new List<int>(list.Count);
+            var visited = new bool[list.Count];
+            void Dfs(int idx)
+            {
+                if (idx < 0 || idx >= list.Count || visited[idx]) return;
+                visited[idx] = true;
+                displayOrder.Add(idx);
+                for (int c = 0; c < list.Count; c++)
+                    if (parentIdx[c] == idx) Dfs(c);
+            }
+            for (int k = 0; k < list.Count; k++) if (parentIdx[k] < 0) Dfs(k);
+            for (int k = 0; k < list.Count; k++) if (!visited[k]) displayOrder.Add(k); // orphelins / cycles
+
+            // Options du dropdown Parent : "(none)" + tous les Identifier non vides.
+            var parentIds    = new List<string> { "" };
+            var parentLabels = new List<string> { "(none)" };
+            for (int k = 0; k < list.Count; k++)
+            {
+                var id = list[k]?.Identifier;
+                if (string.IsNullOrEmpty(id)) continue;
+                parentIds.Add(id);
+                parentLabels.Add($"#{k}  {id}");
+            }
+            string[] parentLabelsArr = parentLabels.ToArray();
+
+            // Détecte si affecter newParentId à childIndex créerait un cycle.
+            bool WouldCycle(int childIndex, string newParentId)
+            {
+                if (string.IsNullOrEmpty(newParentId)) return false;
+                if (!idToIndex.TryGetValue(newParentId, out int p)) return false;
+                int guard = 0;
+                while (p >= 0 && guard++ <= list.Count)
+                {
+                    if (p == childIndex) return true;
+                    var pid = list[p]?.LinkParent;
+                    if (string.IsNullOrEmpty(pid) || !idToIndex.TryGetValue(pid, out p)) break;
+                }
+                return false;
+            }
+
+            // Encadré bleu pour les Trackers (60).
+            Color colTrackerBlue = new Color(0.35f, 0.62f, 1f, 1f);
+            var trackerBoxStyle = new GUIStyle
+            {
+                normal  = { background = MakeRoundedTex(32, 32, new Color(colTrackerBlue.r, colTrackerBlue.g, colTrackerBlue.b, 0.12f), 4) },
+                border  = new RectOffset(4, 4, 4, 4),
+                padding = new RectOffset(0, 0, 0, 0),
+                margin  = new RectOffset(0, 0, 0, 0),
+            };
+
+            foreach (int i in displayOrder)
             {
                 var entry = list[i] ?? (list[i] = new WeaponBinding());
 
-                EditorGUILayout.BeginHorizontal();
+                // Force Steam n'est proposé que pour les Trackers (60). Capturé ici (avant le dropdown
+                // Controller) pour garder un nombre de contrôles IMGUI constant sur la frame.
+                bool isTracker = entry.Controller == Controller.TRACKER;
 
-                // Index badge
-                var idxStyle = new GUIStyle(badgeStyle);
-                idxStyle.alignment = TextAnchor.MiddleCenter;
-                GUILayout.Label($"#{i}", idxStyle, GUILayout.Width(30));
+                // Encadré bleu sur toute la ligne pour un Tracker (60).
+                Rect rowRect = EditorGUILayout.BeginHorizontal(isTracker ? trackerBoxStyle : GUIStyle.none);
+
+                // Indentation hiérarchique + connecteur pour les enfants.
+                if (depth[i] > 0)
+                {
+                    GUILayout.Space(depth[i] * 16f);
+                    var connStyle = new GUIStyle(badgeStyle) { alignment = TextAnchor.MiddleCenter, fontSize = 11 };
+                    connStyle.normal.textColor = colTextMuted;
+                    connStyle.normal.background = null;
+                    GUILayout.Label("└", connStyle, GUILayout.Width(12));
+                }
+
+                // Index badge — fond orange si l'entrée a un parent (LinkParent résolu).
+                bool hasParent = parentIdx[i] >= 0;
+                var idxStyle = new GUIStyle(badgeStyle) { alignment = TextAnchor.MiddleCenter };
+                if (hasParent)
+                {
+                    idxStyle.normal.background = MakeRoundedTex(32, 32, new Color(1f, 0.55f, 0.15f, 0.85f), 4);
+                    idxStyle.normal.textColor  = Color.white;
+                }
+                GUILayout.Label(new GUIContent($"#{i}",
+                    hasParent ? "This device has a parent (LinkParent)." : null), idxStyle, GUILayout.Width(30));
 
                 // Controller dropdown
                 int curIdx = Array.IndexOf(controllerValues, entry.Controller);
@@ -688,32 +705,24 @@ namespace VaroniaBackOffice
                     _isDirty = true;
                 }
 
-                // SerialNumber textfield
-                EditorGUI.BeginChangeCheck();
-                string nextSerial = EditorGUILayout.TextField(entry.SerialNumber ?? "");
-                if (EditorGUI.EndChangeCheck())
-                {
-                    entry.SerialNumber = nextSerial;
-                    _isDirty = true;
-                }
-
-                // ── Exclusion mutuelle : TrackingId XOR ForceSteamId ──
+                // ── Exclusion mutuelle : Identifier XOR ForceSteamId ──
                 // Si l'un est rempli, l'autre est grisé (disabled) avec un tooltip.
                 // Les deux peuvent rester vides/-1 (= aucun override).
-                bool hasTrackingId   = !string.IsNullOrEmpty(entry.TrackingId);
-                bool hasForceSteamId = entry.ForceSteamId >= 0;
+                bool hasIdentifier   = !string.IsNullOrEmpty(entry.Identifier);
+                // Force Steam ne compte (pour l'exclusion) que sur un Tracker.
+                bool hasForceSteamId = isTracker && entry.ForceSteamId >= 0;
 
-                // TrackingId textfield (disabled si ForceSteamId est set)
-                bool trackingIdDisabled = hasForceSteamId && !hasTrackingId;
-                GUI.enabled = !trackingIdDisabled;
+                // Identifier textfield (MAC MQTT ou serial de tracking) — disabled si ForceSteamId set
+                bool identifierDisabled = hasForceSteamId && !hasIdentifier;
+                GUI.enabled = !identifierDisabled;
                 EditorGUI.BeginChangeCheck();
-                string trackingPlaceholder = trackingIdDisabled
+                string identifierPlaceholder = identifierDisabled
                     ? "(disabled — Force Steam set)"
-                    : (entry.TrackingId ?? "");
-                string nextTrackingId = EditorGUILayout.TextField(trackingPlaceholder);
-                if (EditorGUI.EndChangeCheck() && !trackingIdDisabled)
+                    : (entry.Identifier ?? "");
+                string nextIdentifier = EditorGUILayout.TextField(identifierPlaceholder);
+                if (EditorGUI.EndChangeCheck() && !identifierDisabled)
                 {
-                    entry.TrackingId = nextTrackingId;
+                    entry.Identifier = nextIdentifier;
                     _isDirty = true;
                 }
                 GUI.enabled = true;
@@ -727,20 +736,85 @@ namespace VaroniaBackOffice
                 orStyle.normal.textColor  = colTextMuted;
                 orStyle.normal.background = MakeRoundedTex(32, 32, new Color(1f, 1f, 1f, 0.04f), 4);
                 GUILayout.Label(new GUIContent("OR",
-                    "Tracking ID and Force Steam are mutually exclusive — pick one, or leave both empty for auto."),
+                    "Identifier and Force Steam are mutually exclusive — pick one, or leave both empty for auto."),
                     orStyle, GUILayout.Width(24));
 
-                // ForceSteamId intfield (disabled si TrackingId est set)
-                bool forceSteamDisabled = hasTrackingId && !hasForceSteamId;
-                GUI.enabled = !forceSteamDisabled;
-                EditorGUI.BeginChangeCheck();
-                int nextForceSteamId = EditorGUILayout.IntField(entry.ForceSteamId, GUILayout.Width(70));
-                if (EditorGUI.EndChangeCheck() && !forceSteamDisabled)
+                // ForceSteamId : uniquement pour les Trackers (60). Sinon champ "N/A" grisé.
+                if (isTracker)
                 {
-                    entry.ForceSteamId = nextForceSteamId;
+                    // disabled si Identifier est set (exclusion mutuelle)
+                    bool forceSteamDisabled = hasIdentifier && !hasForceSteamId;
+                    GUI.enabled = !forceSteamDisabled;
+                    EditorGUI.BeginChangeCheck();
+                    int nextForceSteamId = EditorGUILayout.IntField(entry.ForceSteamId, GUILayout.Width(70));
+                    if (EditorGUI.EndChangeCheck() && !forceSteamDisabled)
+                    {
+                        entry.ForceSteamId = nextForceSteamId;
+                        _isDirty = true;
+                    }
+                    GUI.enabled = true;
+                }
+                else
+                {
+                    // Visuel uniquement : la valeur ForceSteamId de l'entrée n'est pas modifiée.
+                    var naStyle = new GUIStyle(EditorStyles.miniLabel) { alignment = TextAnchor.MiddleCenter };
+                    naStyle.normal.textColor = colTextMuted;
+                    GUILayout.Label(new GUIContent("—",
+                        "Force Steam n'est disponible que pour les contrôleurs Tracker (60)."),
+                        naStyle, GUILayout.Width(70));
+                }
+
+                // ── Parent (LinkParent via Identifier) ──
+                int parentSel = 0;
+                if (!string.IsNullOrEmpty(entry.LinkParent))
+                {
+                    int found = parentIds.IndexOf(entry.LinkParent);
+                    parentSel = found >= 0 ? found : 0;
+                }
+                EditorGUI.BeginChangeCheck();
+                int nextParentSel = EditorGUILayout.Popup(parentSel, parentLabelsArr, GUILayout.Width(120));
+                if (EditorGUI.EndChangeCheck())
+                {
+                    string chosen = parentIds[Mathf.Clamp(nextParentSel, 0, parentIds.Count - 1)];
+                    // Refuse de se pointer soi-même ou de créer un cycle.
+                    bool isSelf = !string.IsNullOrEmpty(chosen) && chosen == entry.Identifier;
+                    if (!isSelf && !WouldCycle(i, chosen))
+                    {
+                        entry.LinkParent = chosen;
+                        _isDirty = true;
+                    }
+                    else
+                    {
+                        Debug.LogWarning("[GlobalConfig] Parent refusé (soi-même ou cycle détecté).");
+                    }
+                }
+
+                // ── IsDefault : toggle exclusif (un seul par liste). Un enfant ne peut PAS être default. ──
+                GUILayout.Space(12);
+                if (hasParent && entry.IsDefault)
+                {
+                    entry.IsDefault = false; // un enfant perd son statut de default
                     _isDirty = true;
                 }
-                GUI.enabled = true;
+                using (new EditorGUI.DisabledScope(hasParent))
+                {
+                    EditorGUI.BeginChangeCheck();
+                    bool nextDefault = EditorGUILayout.Toggle(entry.IsDefault, GUILayout.Width(36));
+                    if (EditorGUI.EndChangeCheck())
+                    {
+                        if (nextDefault)
+                        {
+                            // On coche celui-ci et on décoche tous les autres.
+                            for (int j = 0; j < list.Count; j++)
+                                if (list[j] != null) list[j].IsDefault = (j == i);
+                        }
+                        else
+                        {
+                            entry.IsDefault = false; // autorise 0 défaut
+                        }
+                        _isDirty = true;
+                    }
+                }
 
                 // Remove button
                 var removeStyle = new GUIStyle(buttonStyle)
@@ -756,6 +830,17 @@ namespace VaroniaBackOffice
                     toRemove = i;
 
                 EditorGUILayout.EndHorizontal();
+
+                // Bordure bleue (encadré) autour de la ligne d'un Tracker (60), volontairement translucide.
+                if (isTracker && Event.current.type == EventType.Repaint)
+                {
+                    Color border = new Color(colTrackerBlue.r, colTrackerBlue.g, colTrackerBlue.b, 0.40f);
+                    EditorGUI.DrawRect(new Rect(rowRect.x, rowRect.y, rowRect.width, 1f), border);
+                    EditorGUI.DrawRect(new Rect(rowRect.x, rowRect.yMax - 1f, rowRect.width, 1f), border);
+                    EditorGUI.DrawRect(new Rect(rowRect.x, rowRect.y, 1f, rowRect.height), border);
+                    EditorGUI.DrawRect(new Rect(rowRect.xMax - 1f, rowRect.y, 1f, rowRect.height), border);
+                }
+
                 EditorGUILayout.Space(2);
             }
 
@@ -780,7 +865,7 @@ namespace VaroniaBackOffice
             addStyle.hover.textColor   = Color.white;
             addStyle.active.background = texAccentSolid;
 
-            if (GUILayout.Button(new GUIContent("+ ADD WEAPON", "Append a new empty weapon binding to the list."),
+            if (GUILayout.Button(new GUIContent("+ ADD DEVICE", "Append a new empty device binding to the list."),
                 addStyle, GUILayout.Height(22)))
             {
                 list.Add(new WeaponBinding());
@@ -790,6 +875,18 @@ namespace VaroniaBackOffice
             EditorGUILayout.EndHorizontal();
 
             EditorGUILayout.Space(4);
+
+            EditorGUILayout.EndVertical();
+
+            // Encadrement rouge léger autour de tout le bloc Devices.
+            if (Event.current.type == EventType.Repaint)
+            {
+                Color rb = new Color(1f, 0.38f, 0.38f, 0.30f);
+                EditorGUI.DrawRect(new Rect(blockRect.x, blockRect.y, blockRect.width, 1f), rb);
+                EditorGUI.DrawRect(new Rect(blockRect.x, blockRect.yMax - 1f, blockRect.width, 1f), rb);
+                EditorGUI.DrawRect(new Rect(blockRect.x, blockRect.y, 1f, blockRect.height), rb);
+                EditorGUI.DrawRect(new Rect(blockRect.xMax - 1f, blockRect.y, 1f, blockRect.height), rb);
+            }
         }
 
         // ─── Extra fields ─────────────────────────────────────────────────────────

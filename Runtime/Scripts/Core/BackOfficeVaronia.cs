@@ -81,9 +81,24 @@ namespace VaroniaBackOffice
         private bool _showFdpDebug = false;
         private string _fdpPathFound = "";
 
-        // Alerte "Controller ID not found" : une arme (legacy ou Devices) n'a pas d'enum Controller valide.
+        // Alerte "Controller ID not found" : une arme de Devices n'a pas d'enum Controller valide.
         private bool _showControllerWarning = false;
         private string _controllerWarningMsg = "";
+
+        // Erreurs runtime remontées par les systèmes (armes, tracking…), affichées en bannière rouge.
+        private readonly List<string> _runtimeErrors = new List<string>();
+
+        /// <summary>
+        /// Remonte une erreur runtime affichée comme bannière rouge in-game (même style que
+        /// "Controller ID not found"). Dédoublonnée. Utilisé par ex. par VaroniaWeaponTracking.
+        /// </summary>
+        public static void ReportError(string msg)
+        {
+            if (string.IsNullOrEmpty(msg)) return;
+            Debug.LogError("[BackOfficeVaronia] " + msg);
+            if (Instance == null) return;
+            if (!Instance._runtimeErrors.Contains(msg)) Instance._runtimeErrors.Add(msg);
+        }
 
         // Surveillance runtime du DeviceMode : si la config change (ex. on devient spectateur),
         // on lève OnMovieChanged automatiquement pour que tous les overlays se réévaluent.
@@ -283,7 +298,7 @@ namespace VaroniaBackOffice
 
         private void OnGUI()
         {
-            if (!_showFdpDebug && !_showControllerWarning) return;
+            if (!_showFdpDebug && !_showControllerWarning && _runtimeErrors.Count == 0) return;
 
             float y = 50f;
 
@@ -299,6 +314,13 @@ namespace VaroniaBackOffice
                     "⛔  CONTROLLER ID NOT FOUND",
                     _controllerWarningMsg,
                     "Vérifie le champ Controller (enum) de l'arme dans GlobalConfig.",
+                    new Color(1f, 0.30f, 0.30f, 1f)); // rouge
+
+            for (int i = 0; i < _runtimeErrors.Count; i++)
+                DrawBanner(ref y,
+                    "⛔  ERREUR",
+                    _runtimeErrors[i],
+                    null,
                     new Color(1f, 0.30f, 0.30f, 1f)); // rouge
         }
 
@@ -512,38 +534,30 @@ namespace VaroniaBackOffice
 
             ValidateControllers();
 
+            // Snapshot stable des armes (papas) : le JSON ne bouge plus après ce point.
+            VaroniaWeaponRegistry.Build(config);
+            _runtimeErrors.Clear();
+
             OnConfigLoaded?.Invoke();
         }
 
         /// <summary>
-        /// Vérifie que chaque arme configurée possède un enum <see cref="Controller"/> valide.
-        /// - Mode legacy (ForceLegacyController OU liste Devices vide) → vérifie le Controller mono-arme.
-        /// - Mode multi-arme → vérifie le Controller de chaque entrée de <see cref="GlobalConfig.Devices"/>.
-        /// Si une arme n'a pas d'enum valide, affiche l'alerte "Controller ID not found".
+        /// Vérifie que chaque arme de <see cref="GlobalConfig.Devices"/> possède un enum
+        /// <see cref="Controller"/> valide. Si une arme n'a pas d'enum valide, affiche
+        /// l'alerte "Controller ID not found".
         /// </summary>
         private void ValidateControllers()
         {
             _showControllerWarning = false;
             _controllerWarningMsg = "";
-            if (config == null) return;
+            if (config == null || config.Devices == null) return;
 
             var missing = new List<string>();
-            bool legacyActive = config.ForceLegacyController || config.Devices == null || config.Devices.Count == 0;
-
-            if (legacyActive)
+            for (int i = 0; i < config.Devices.Count; i++)
             {
-                if (HasNoControllerEnum(config.Controller))
-                    missing.Add("Legacy Controller");
-            }
-
-            if (!config.ForceLegacyController && config.Devices != null)
-            {
-                for (int i = 0; i < config.Devices.Count; i++)
-                {
-                    var d = config.Devices[i];
-                    if (d != null && HasNoControllerEnum(d.Controller))
-                        missing.Add(string.IsNullOrEmpty(d.SerialNumber) ? $"Device #{i}" : $"Device #{i} ({d.SerialNumber})");
-                }
+                var d = config.Devices[i];
+                if (d != null && HasNoControllerEnum(d.Controller))
+                    missing.Add(string.IsNullOrEmpty(d.Identifier) ? $"Device #{i}" : $"Device #{i} ({d.Identifier})");
             }
 
             if (missing.Count > 0)
@@ -585,6 +599,25 @@ namespace VaroniaBackOffice
         }
 
         /// <summary>
+        /// Cast robuste d'une valeur (réflexion ou JSON) vers T. Ne lève JAMAIS : renvoie
+        /// <paramref name="defaultValue"/> si la valeur est null ou non convertible.
+        /// </summary>
+        private static T SafeCast<T>(object value, T defaultValue)
+        {
+            try
+            {
+                if (value == null) return defaultValue;
+                if (value is T tv) return tv;
+                if (typeof(T) == typeof(string)) return (T)(object)value.ToString();
+                return (T)Convert.ChangeType(value, typeof(T));
+            }
+            catch
+            {
+                return defaultValue;
+            }
+        }
+
+        /// <summary>
         /// Récupère la valeur d'un champ du GlobalConfig par son nom (insensible à la casse).
         /// Exemple : GetConfigField&lt;string&gt;("ServerIP") ou GetConfigField&lt;int&gt;("MQTT_IDClient")
         /// </summary>
@@ -599,6 +632,7 @@ namespace VaroniaBackOffice
                 Debug.LogWarning("[BackOfficeVaronia] Config not loaded.");
                 return defaultValue;
             }
+            if (string.IsNullOrEmpty(fieldName)) return defaultValue;
 
             var field = typeof(GlobalConfig).GetField(fieldName,
                 System.Reflection.BindingFlags.Public |
@@ -606,7 +640,7 @@ namespace VaroniaBackOffice
                 System.Reflection.BindingFlags.IgnoreCase);
 
             if (field != null)
-                return (T)System.Convert.ChangeType(field.GetValue(config), typeof(T));
+                return SafeCast<T>(field.GetValue(config), defaultValue);
 
             var prop = typeof(GlobalConfig).GetProperty(fieldName,
                 System.Reflection.BindingFlags.Public |
@@ -614,28 +648,15 @@ namespace VaroniaBackOffice
                 System.Reflection.BindingFlags.IgnoreCase);
 
             if (prop != null)
-                return (T)System.Convert.ChangeType(prop.GetValue(config), typeof(T));
+                return SafeCast<T>(prop.GetValue(config), defaultValue);
 
-            // Chercher dans les champs dynamiques du JSON
-            foreach (var key in extraFields.Keys)
+            // Chercher dans les champs dynamiques du JSON (dico jamais supposé non-null).
+            if (extraFields != null)
             {
-                if (string.Equals(key, fieldName, StringComparison.OrdinalIgnoreCase))
+                foreach (var key in extraFields.Keys)
                 {
-                    try
-                    {
-                        var val = extraFields[key];
-                        if (val == null) return defaultValue;
-
-                        if (typeof(T) == typeof(string))
-                            return (T)(object)val.ToString();
-
-                        return (T)Convert.ChangeType(val, typeof(T));
-                    }
-                    catch (Exception e)
-                    {
-                        Debug.LogError($"[BackOfficeVaronia] Erreur de cast pour '{fieldName}' dans GlobalConfig: {e.Message}");
-                        return defaultValue;
-                    }
+                    if (string.Equals(key, fieldName, StringComparison.OrdinalIgnoreCase))
+                        return SafeCast<T>(extraFields[key], defaultValue);
                 }
             }
 
@@ -654,6 +675,7 @@ namespace VaroniaBackOffice
                 Debug.LogWarning("[BackOfficeVaronia] GameConfig not loaded.");
                 return defaultValue;
             }
+            if (string.IsNullOrEmpty(fieldName)) return defaultValue;
 
             var field = typeof(GameConfig).GetField(fieldName,
                 System.Reflection.BindingFlags.Public |
@@ -661,7 +683,7 @@ namespace VaroniaBackOffice
                 System.Reflection.BindingFlags.IgnoreCase);
 
             if (field != null)
-                return (T)System.Convert.ChangeType(field.GetValue(gameConfig), typeof(T));
+                return SafeCast<T>(field.GetValue(gameConfig), defaultValue);
 
             var prop = typeof(GameConfig).GetProperty(fieldName,
                 System.Reflection.BindingFlags.Public |
@@ -669,28 +691,15 @@ namespace VaroniaBackOffice
                 System.Reflection.BindingFlags.IgnoreCase);
 
             if (prop != null)
-                return (T)System.Convert.ChangeType(prop.GetValue(gameConfig), typeof(T));
+                return SafeCast<T>(prop.GetValue(gameConfig), defaultValue);
 
             // Chercher dans les champs dynamiques du GameConfig (JSON uniquement)
-            foreach (var key in gameConfigExtraFields.Keys)
+            if (gameConfigExtraFields != null)
             {
-                if (string.Equals(key, fieldName, StringComparison.OrdinalIgnoreCase))
+                foreach (var key in gameConfigExtraFields.Keys)
                 {
-                    try
-                    {
-                        var val = gameConfigExtraFields[key];
-                        if (val == null) return defaultValue;
-
-                        if (typeof(T) == typeof(string))
-                            return (T)(object)val.ToString();
-
-                        return (T)Convert.ChangeType(val, typeof(T));
-                    }
-                    catch (Exception e)
-                    {
-                        Debug.LogError($"[BackOfficeVaronia] Erreur de cast pour '{fieldName}' dans GameConfig: {e.Message}");
-                        return defaultValue;
-                    }
+                    if (string.Equals(key, fieldName, StringComparison.OrdinalIgnoreCase))
+                        return SafeCast<T>(gameConfigExtraFields[key], defaultValue);
                 }
             }
 
@@ -712,6 +721,7 @@ namespace VaroniaBackOffice
                 Debug.LogWarning("[BackOfficeVaronia] GameScore instance is null.");
                 return defaultValue;
             }
+            if (string.IsNullOrEmpty(fieldName)) return defaultValue;
 
             var field = typeof(GameScore).GetField(fieldName,
                 System.Reflection.BindingFlags.Public |
@@ -719,7 +729,7 @@ namespace VaroniaBackOffice
                 System.Reflection.BindingFlags.IgnoreCase);
 
             if (field != null)
-                return (T)System.Convert.ChangeType(field.GetValue(gameScore), typeof(T));
+                return SafeCast<T>(field.GetValue(gameScore), defaultValue);
 
             var prop = typeof(GameScore).GetProperty(fieldName,
                 System.Reflection.BindingFlags.Public |
@@ -727,7 +737,7 @@ namespace VaroniaBackOffice
                 System.Reflection.BindingFlags.IgnoreCase);
 
             if (prop != null)
-                return (T)System.Convert.ChangeType(prop.GetValue(gameScore), typeof(T));
+                return SafeCast<T>(prop.GetValue(gameScore), defaultValue);
 
             Debug.LogWarning($"[BackOfficeVaronia] Champ '{fieldName}' introuvable dans GameScore.");
 #else
