@@ -33,8 +33,9 @@ namespace VBO_Ultimate.Runtime.Scripts.Input
             yield return new WaitUntil(() => BackOfficeVaronia.Instance.mqttClient != null);
             yield return new WaitUntil(() => BackOfficeVaronia.Instance.mqttClient.client != null);
 
-            // Système multi-armes : on prend l'Identifier du binding à cet index dans GlobalConfig.Devices.
-            var binding = BackOfficeVaronia.Instance.config.GetWeaponBinding(_weaponIndex);
+            // _weaponIndex = slot (position parmi les papas), PAS l'index brut de Devices.
+            // On passe donc par le registry pour retrouver la bonne arme (papa).
+            var binding = VaroniaWeaponRegistry.GetParent(_weaponIndex);
             if (binding == null || string.IsNullOrEmpty(binding.Identifier))
             {
                 Debug.LogWarning($"[MQTT_Weapon] Aucun Identifier pour weaponIndex={_weaponIndex} dans GlobalConfig.Devices — abonnement MQTT ignoré.");
