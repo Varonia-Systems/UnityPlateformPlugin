@@ -22,6 +22,20 @@ namespace VaroniaBackOffice
         /// <summary>Nombre d'armes (papas) dans le snapshot.</summary>
         public static int Count => _parents.Count;
 
+        /// <summary>
+        /// Slot de l'arme par défaut : le premier papa <see cref="WeaponBinding.IsDefault"/>,
+        /// à défaut 0 (premier papa). Sert aux API rétrocompat sans index de VaroniaInput.
+        /// </summary>
+        public static int DefaultIndex
+        {
+            get
+            {
+                for (int i = 0; i < _parents.Count; i++)
+                    if (_parents[i].IsDefault) return i;
+                return 0;
+            }
+        }
+
         /// <summary>Construit le snapshot des papas. À appeler après le chargement de la config.</summary>
         public static void Build(GlobalConfig config)
         {

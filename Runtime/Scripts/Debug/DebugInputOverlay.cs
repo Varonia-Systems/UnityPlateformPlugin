@@ -21,7 +21,6 @@ namespace VaroniaBackOffice
         // Panneau toujours ancré en bas à droite ; largeur fixe, hauteur dynamique (UITK).
         private const float PanelWidth      = 160f; // largeur (x) fixe
         private const float ScreenMargin    = 12f;  // marge depuis le coin bas-droit
-        private const float ImguiSlotHeight = 160f; // IMGUI : hauteur de slot fixe (pas de hauteur dynamique)
         private const float StartY          = 150f; // décalage depuis le bas (place pour un autre debug déjà présent)
 
         [Header("UI Scale")]
@@ -536,11 +535,35 @@ namespace VaroniaBackOffice
             GUI.Label(new Rect(x + 60f * scale, y, W - 74f * scale, 15f * scale), value, valStyle);
         }
 
+        // Hauteur dynamique : somme des lignes réellement affichées (mêmes conditions que OnGUI).
+        private float ComputeContentHeightIMGUI(float scale)
+        {
+            float pad = 6f * scale;
+            float h = pad
+                    + 18f * scale          // titre
+                    + 4f  * scale          // gap
+                    + 28f * scale          // rangée de boutons
+                    + 8f  * scale;         // gap avant télémétrie
+
+            // last input / tracked / connected : seulement si la source n'est pas un MQTTInput.
+            if (_mqttInput == null)
+                h += (16f + 18f) * scale   // last input (label + valeur)
+                   + 16f * scale           // tracked
+                   + 16f * scale;          // connected
+
+            if (VaroniaInput.GetBattery(_weaponIndex)  != 0) h += 16f * scale;
+            if (VaroniaInput.GetRSSI(_weaponIndex)     != 0) h += 16f * scale;
+            if (VaroniaInput.GetBootTime(_weaponIndex) != 0) h += 16f * scale;
+
+            h += pad; // marge basse
+            return h;
+        }
+
         private Rect GetPanelRect(float scale)
         {
             // Position fixe bas-droite, décalée de StartY pour ne pas recouvrir le debug du coin.
-            // Pas d'empilement (plus de décalage par _weaponIndex).
-            float w = PanelWidth * scale, h = ImguiSlotHeight * scale;
+            // Hauteur dynamique selon le contenu ; pas d'empilement (plus de décalage par _weaponIndex).
+            float w = PanelWidth * scale, h = ComputeContentHeightIMGUI(scale);
             float m = ScreenMargin * scale;
             float x = Screen.width  - w - m;
             float y = Screen.height - h - m - StartY * scale;

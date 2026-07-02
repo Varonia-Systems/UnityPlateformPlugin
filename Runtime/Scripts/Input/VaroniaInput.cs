@@ -270,10 +270,12 @@ namespace VaroniaBackOffice
         private static int[]    _bootTime    = new int[1];
         private static string[] _model       = new string[1];
 
-        // ── Rétrocompatibilité (arme 0) ──────────────────────────────────────
+        // ── Rétrocompatibilité (arme par défaut) ─────────────────────────────
+        // Les overloads sans index ciblent l'arme IsDefault (slot résolu par le registry),
+        // et non plus le slot 0 en dur.
 
-        /// <summary> Retourne true si le bouton de l'arme 0 est enfoncé. </summary>
-        public static bool GetButton(VaroniaButton button) => GetButton(0, button);
+        /// <summary> Retourne true si le bouton de l'arme par défaut est enfoncé. </summary>
+        public static bool GetButton(VaroniaButton button) => GetButton(VaroniaWeaponRegistry.DefaultIndex, button);
 
         /// <summary> Retourne true si le bouton de l'arme donnée est enfoncé. </summary>
         public static bool GetButton(int weaponIndex, VaroniaButton button)
@@ -283,8 +285,8 @@ namespace VaroniaBackOffice
             return _states[weaponIndex][(int)button];
         }
 
-        /// <summary> Retourne true durant la frame où le bouton de l'arme 0 est enfoncé. </summary>
-        public static bool GetButtonDown(VaroniaButton button) => GetButtonDown(0, button);
+        /// <summary> Retourne true durant la frame où le bouton de l'arme par défaut est enfoncé. </summary>
+        public static bool GetButtonDown(VaroniaButton button) => GetButtonDown(VaroniaWeaponRegistry.DefaultIndex, button);
 
         /// <summary> Retourne true durant la frame où le bouton de l'arme donnée est enfoncé. </summary>
         public static bool GetButtonDown(int weaponIndex, VaroniaButton button)
@@ -295,8 +297,8 @@ namespace VaroniaBackOffice
             return _states[weaponIndex][idx] && !_lastStates[weaponIndex][idx];
         }
 
-        /// <summary> Retourne true durant la frame où le bouton de l'arme 0 est relâché. </summary>
-        public static bool GetButtonUp(VaroniaButton button) => GetButtonUp(0, button);
+        /// <summary> Retourne true durant la frame où le bouton de l'arme par défaut est relâché. </summary>
+        public static bool GetButtonUp(VaroniaButton button) => GetButtonUp(VaroniaWeaponRegistry.DefaultIndex, button);
 
         /// <summary> Retourne true durant la frame où le bouton de l'arme donnée est relâché. </summary>
         public static bool GetButtonUp(int weaponIndex, VaroniaButton button)
@@ -320,31 +322,31 @@ namespace VaroniaBackOffice
 
    
 
-        /// <summary> Connexion de l'arme 0. </summary>
-        public static bool IsConnected => GetIsConnected(0);
-        public static bool GetIsConnected(int weaponIndex) => weaponIndex < _isConnected.Length && _isConnected[weaponIndex];
+        /// <summary> Connexion de l'arme par défaut. </summary>
+        public static bool IsConnected => GetIsConnected(VaroniaWeaponRegistry.DefaultIndex);
+        public static bool GetIsConnected(int weaponIndex) => weaponIndex >= 0 && weaponIndex < _isConnected.Length && _isConnected[weaponIndex];
 
-        /// <summary> Batterie de l'arme 0. </summary>
-        public static int Battery => GetBattery(0);
-        public static int GetBattery(int weaponIndex) => weaponIndex < _battery.Length ? _battery[weaponIndex] : 0;
+        /// <summary> Batterie de l'arme par défaut. </summary>
+        public static int Battery => GetBattery(VaroniaWeaponRegistry.DefaultIndex);
+        public static int GetBattery(int weaponIndex) => (weaponIndex >= 0 && weaponIndex < _battery.Length) ? _battery[weaponIndex] : 0;
 
-        /// <summary> RSSI de l'arme 0. </summary>
-        public static float RSSI => GetRSSI(0);
-        public static float GetRSSI(int weaponIndex) => weaponIndex < _rssi.Length ? _rssi[weaponIndex] : 0f;
+        /// <summary> RSSI de l'arme par défaut. </summary>
+        public static float RSSI => GetRSSI(VaroniaWeaponRegistry.DefaultIndex);
+        public static float GetRSSI(int weaponIndex) => (weaponIndex >= 0 && weaponIndex < _rssi.Length) ? _rssi[weaponIndex] : 0f;
 
-        /// <summary> BootTime de l'arme 0. </summary>
-        public static int BootTime => GetBootTime(0);
-        public static int GetBootTime(int weaponIndex) => weaponIndex < _bootTime.Length ? _bootTime[weaponIndex] : 0;
+        /// <summary> BootTime de l'arme par défaut. </summary>
+        public static int BootTime => GetBootTime(VaroniaWeaponRegistry.DefaultIndex);
+        public static int GetBootTime(int weaponIndex) => (weaponIndex >= 0 && weaponIndex < _bootTime.Length) ? _bootTime[weaponIndex] : 0;
 
-        /// <summary> Modèle de l'arme 0. </summary>
-        public static string Model => GetModel(0);
-        public static string GetModel(int weaponIndex) => weaponIndex < _model.Length ? _model[weaponIndex] : null;
+        /// <summary> Modèle de l'arme par défaut. </summary>
+        public static string Model => GetModel(VaroniaWeaponRegistry.DefaultIndex);
+        public static string GetModel(int weaponIndex) => (weaponIndex >= 0 && weaponIndex < _model.Length) ? _model[weaponIndex] : null;
 
         // ── Mise à jour télémétrie ────────────────────────────────────────────
 
-        /// <summary> Met à jour la télémétrie de l'arme 0 (rétrocompatibilité). </summary>
+        /// <summary> Met à jour la télémétrie de l'arme par défaut (rétrocompatibilité). </summary>
         public static void SetDeviceData(bool isConnected, int battery, float rssi, int bootTime, string model = null)
-            => SetDeviceData(0, isConnected, battery, rssi, bootTime, model);
+            => SetDeviceData(VaroniaWeaponRegistry.DefaultIndex, isConnected, battery, rssi, bootTime, model);
 
         /// <summary> Met à jour la télémétrie de l'arme à l'index donné. </summary>
         public static void SetDeviceData(int weaponIndex, bool isConnected, int battery, float rssi, int bootTime, string model = null)
@@ -484,10 +486,10 @@ namespace VaroniaBackOffice
         }
 
         /// <summary>
-        /// Définit l'état d'un bouton pour l'arme 0 (rétrocompatibilité).
+        /// Définit l'état d'un bouton pour l'arme par défaut (rétrocompatibilité).
         /// </summary>
         public static void SetButton(VaroniaButton button, bool pressed)
-            => SetButton(0, button, pressed);
+            => SetButton(VaroniaWeaponRegistry.DefaultIndex, button, pressed);
 
         /// <summary>
         /// Définit l'état d'un bouton pour l'arme à l'index donné.
@@ -508,7 +510,8 @@ namespace VaroniaBackOffice
 
             OnButtonChanged?.Invoke(weaponIndex, button, pressed);
 
-            if (weaponIndex == 0)
+            // Les UnityEvents rétrocompat (Inspector + statiques) ciblent l'arme par défaut.
+            if (weaponIndex == VaroniaWeaponRegistry.DefaultIndex)
             {
                 if (Instance != null)
                     Instance.FireInstanceEvents(button, pressed);
