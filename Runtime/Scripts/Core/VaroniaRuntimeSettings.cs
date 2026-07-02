@@ -32,6 +32,18 @@ namespace VaroniaBackOffice
     /// Référence le prefab VaroniaManager pour l'auto-instanciation.
     /// Câblé automatiquement par VaroniaPackageWiring à l'ouverture de l'éditeur.
     /// </summary>
+    /// <summary>
+    /// Source de tracking utilisée par défaut pour les trackers.
+    /// - <see cref="Identifier"/> : le champ Identifier du tracker = serial SteamVR (tracking id).
+    /// - <see cref="ForceSteamIndex"/> : le champ ForceSteamId du tracker = index SteamVR.
+    /// (Si le champ prioritaire est vide, on retombe sur l'autre, puis sur l'auto-find.)
+    /// </summary>
+    public enum TrackerTrackingSource
+    {
+        Identifier,
+        ForceSteamIndex,
+    }
+
     public class VaroniaRuntimeSettings : ScriptableObject
     {
         private static VaroniaRuntimeSettings _cached;
@@ -58,6 +70,12 @@ namespace VaroniaBackOffice
         /// Configurable via Edit > Project Settings > Varonia Back Office.
         /// </summary>
         public bool autoInit = true;
+
+        /// <summary>
+        /// Source de tracking par défaut pour les trackers (Identifier = serial, ou ForceSteam = index).
+        /// Utilisée par VaroniaWeaponTracking pour décider quel champ du tracker enfant lire en priorité.
+        /// </summary>
+        public TrackerTrackingSource defaultTrackerSource = TrackerTrackingSource.Identifier;
 
         /// <summary>
         /// Version du package, copiée automatiquement depuis package.json par VaroniaPackageWiring.

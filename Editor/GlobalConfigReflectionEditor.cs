@@ -663,6 +663,11 @@ namespace VaroniaBackOffice
                 margin  = new RectOffset(0, 0, 0, 0),
             };
 
+            // Réglage projet : quel champ (Identifier / Force Steam) est la source de tracking par défaut.
+            var vrs = VaroniaRuntimeSettings.Load();
+            bool defaultIsIdentifier = vrs == null || vrs.defaultTrackerSource == TrackerTrackingSource.Identifier;
+            Color colGreen = new Color(0.35f, 0.90f, 0.45f, 0.95f);
+
             foreach (int i in displayOrder)
             {
                 var entry = list[i] ?? (list[i] = new WeaponBinding());
@@ -727,6 +732,10 @@ namespace VaroniaBackOffice
                 }
                 GUI.enabled = true;
 
+                // Encadre en vert l'Identifier si c'est la source de tracking par défaut (trackers).
+                if (isTracker && defaultIsIdentifier && Event.current.type == EventType.Repaint)
+                    DrawFieldFrame(GUILayoutUtility.GetLastRect(), colGreen);
+
                 // Séparateur visuel "OR" entre les deux colonnes exclusives
                 var orStyle = new GUIStyle(badgeStyle)
                 {
@@ -753,6 +762,10 @@ namespace VaroniaBackOffice
                         _isDirty = true;
                     }
                     GUI.enabled = true;
+
+                    // Encadre en vert Force Steam si c'est la source de tracking par défaut.
+                    if (!defaultIsIdentifier && Event.current.type == EventType.Repaint)
+                        DrawFieldFrame(GUILayoutUtility.GetLastRect(), colGreen);
                 }
                 else
                 {
@@ -887,6 +900,15 @@ namespace VaroniaBackOffice
                 EditorGUI.DrawRect(new Rect(blockRect.x, blockRect.y, 1f, blockRect.height), rb);
                 EditorGUI.DrawRect(new Rect(blockRect.xMax - 1f, blockRect.y, 1f, blockRect.height), rb);
             }
+        }
+
+        /// <summary>Dessine un cadre 1px autour d'un champ (utilisé pour surligner la source de tracking par défaut).</summary>
+        private static void DrawFieldFrame(Rect r, Color c)
+        {
+            EditorGUI.DrawRect(new Rect(r.x, r.y, r.width, 1f), c);
+            EditorGUI.DrawRect(new Rect(r.x, r.yMax - 1f, r.width, 1f), c);
+            EditorGUI.DrawRect(new Rect(r.x, r.y, 1f, r.height), c);
+            EditorGUI.DrawRect(new Rect(r.xMax - 1f, r.y, 1f, r.height), c);
         }
 
         // ─── Extra fields ─────────────────────────────────────────────────────────

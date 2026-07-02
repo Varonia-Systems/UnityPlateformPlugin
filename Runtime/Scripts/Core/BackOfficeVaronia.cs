@@ -88,6 +88,11 @@ namespace VaroniaBackOffice
         // Erreurs runtime remontées par les systèmes (armes, tracking…), affichées en bannière rouge.
         private readonly List<string> _runtimeErrors = new List<string>();
 
+        // Notification "migration" (ancien format adapté) : bannière bleue (info), pas une erreur.
+        private bool _showLegacyMigration = false;
+        private string _legacyMigrationMsg = "";
+        private float _legacyMigrationTimer = 0f; // auto-close (comme le FDP)
+
         /// <summary>
         /// Remonte une erreur runtime affichée comme bannière rouge in-game (même style que
         /// "Controller ID not found"). Dédoublonnée. Utilisé par ex. par VaroniaWeaponTracking.
@@ -207,6 +212,15 @@ namespace VaroniaBackOffice
                 }
             }
 
+            if (_legacyMigrationTimer > 0)
+            {
+                _legacyMigrationTimer -= Time.deltaTime;
+                if (_legacyMigrationTimer <= 0)
+                {
+                    _showLegacyMigration = false;
+                }
+            }
+
             // Shortcut 'M' to minimize window
             if (IsMKeyDown())
             {
@@ -298,7 +312,7 @@ namespace VaroniaBackOffice
 
         private void OnGUI()
         {
-            if (!_showFdpDebug && !_showControllerWarning && _runtimeErrors.Count == 0) return;
+            if (!_showFdpDebug && !_showControllerWarning && !_showLegacyMigration && _runtimeErrors.Count == 0) return;
 
             float y = 50f;
 
@@ -308,6 +322,13 @@ namespace VaroniaBackOffice
                     _fdpPathFound,
                     $"Closing in {_fdpDebugTimer:F1}s...",
                     new Color(1f, 0.60f, 0.10f, 1f)); // orange
+
+            if (_showLegacyMigration)
+                DrawBanner(ref y,
+                    "♻  COMPATIBILITÉ LEGACY CONTROLLER",
+                    _legacyMigrationMsg,
+                    "Mets à jour ton GlobalConfig.json (Devices) pour retirer l'ancien format.",
+                    new Color(0.35f, 0.62f, 1f, 1f)); // bleu = info
 
             if (_showControllerWarning)
                 DrawBanner(ref y,
@@ -532,6 +553,10 @@ namespace VaroniaBackOffice
             }
             catch { extraFields = new Dictionary<string, object>(); }
 
+            // Rétrocompat : si l'ancien système (Controller + WeaponMAC en JSON) est présent et que
+            // Devices est vide, on le convertit en un papa + un tracker enfant auto-find.
+            MigrateLegacyToDevices();
+
             ValidateControllers();
 
             // Snapshot stable des armes (papas) : le JSON ne bouge plus après ce point.
@@ -539,6 +564,66 @@ namespace VaroniaBackOffice
             _runtimeErrors.Clear();
 
             OnConfigLoaded?.Invoke();
+        }
+
+        /// <summary>
+        /// Rétrocompat : si l'ancien système mono-arme est renseigné dans le JSON (clés "Controller"
+        /// et/ou "WeaponMAC", lues via <see cref="extraFields"/> car les champs n'existent plus dans
+        /// la classe) ET que <see cref="GlobalConfig.Devices"/> est vide/null, on convertit ça en :
+        ///   • un papa qui garde le Controller + l'ancien WeaponMAC comme Identifier ;
+        ///   • un enfant Tracker(60) (Identifier vide, ForceSteamId -1 → auto-find) lié au papa.
+        /// </summary>
+        private void MigrateLegacyToDevices()
+        {
+            _showLegacyMigration = false;
+            _legacyMigrationMsg = "";
+
+            if (config == null) return;
+            if (config.Devices != null && config.Devices.Count > 0) return; // Devices déjà renseigné
+            if (extraFields == null) return;
+
+            object ctrlObj = null, macObj = null;
+            foreach (var kv in extraFields)
+            {
+                if (string.Equals(kv.Key, "Controller", StringComparison.OrdinalIgnoreCase)) ctrlObj = kv.Value;
+                else if (string.Equals(kv.Key, "WeaponMAC", StringComparison.OrdinalIgnoreCase)) macObj = kv.Value;
+            }
+
+            if (ctrlObj == null && macObj == null) return; // rien de legacy
+
+            Controller legacyController = Controller.Unknown;
+            try { if (ctrlObj != null) legacyController = (Controller)Convert.ToInt32(ctrlObj); }
+            catch { }
+
+            string legacyMac = macObj != null ? macObj.ToString() : "";
+
+            if (config.Devices == null) config.Devices = new List<WeaponBinding>();
+
+            // Papa : conserve le Controller et l'ancien WeaponMAC comme Identifier.
+            var papa = new WeaponBinding
+            {
+                Controller = legacyController,
+                Identifier = legacyMac,
+            };
+            // Enfant tracker : Tracker(60), sans serial ni index → auto-find, lié au papa.
+            var child = new WeaponBinding
+            {
+                Controller   = Controller.TRACKER,
+                Identifier   = "",
+                ForceSteamId = -1,
+                LinkParent   = papa.Identifier,
+            };
+
+            config.Devices.Add(papa);
+            config.Devices.Add(child);
+
+            _showLegacyMigration = true;
+            _legacyMigrationTimer = 5f; // se ferme après 5s
+            _legacyMigrationMsg = $"Ancien format détecté et adapté automatiquement : arme {legacyController} " +
+                                  $"(Identifier '{legacyMac}') + tracker auto-find.";
+
+            Debug.LogWarning($"[BackOfficeVaronia] Migration legacy → Devices : arme Controller={legacyController} " +
+                             $"Identifier='{legacyMac}' + tracker(60) auto-find.");
         }
 
         /// <summary>

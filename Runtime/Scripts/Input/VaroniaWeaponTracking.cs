@@ -108,14 +108,26 @@ namespace VBO_Ultimate.Runtime.Scripts.Input
                 overrideAutoFind  = true;
                 overriddenBackend = ItemTracking.TrackingBackend.SteamVR;
 #if STEAMVR_ENABLED
-                if (tracker.ForceSteamId >= 0)
+                bool hasIndex  = tracker.ForceSteamId >= 0;
+                bool hasSerial = !string.IsNullOrEmpty(tracker.Identifier);
+
+                // Défaut projet : le mode choisi n'utilise QUE son champ. Si ce champ n'est pas
+                // renseigné → auto-find (l'autre champ est ignoré, pas de fallback croisé).
+                var settings = VaroniaRuntimeSettings.Load();
+                bool preferIndex = settings != null &&
+                                   settings.defaultTrackerSource == TrackerTrackingSource.ForceSteamIndex;
+
+                bool useIndex  =  preferIndex && hasIndex;
+                bool useSerial = !preferIndex && hasSerial;
+
+                if (useIndex)
                 {
                     overriddenAutoFind        = false; // index précis → pas de scan
                     overriddenUseSerialFilter = false;
                     overriddenTrackerIndex    = tracker.ForceSteamId;
                     Debug.Log($"[VaroniaWeaponTracking] slot={slot} : tracker SteamVR par index {tracker.ForceSteamId}.");
                 }
-                else if (!string.IsNullOrEmpty(tracker.Identifier))
+                else if (useSerial)
                 {
                     overriddenAutoFind        = true;  // FindTracker() ne tourne que si autoFind == true
                     overriddenUseSerialFilter = true;
@@ -124,7 +136,7 @@ namespace VBO_Ultimate.Runtime.Scripts.Input
                 }
                 else
                 {
-                    // Ancien système : auto-find du premier tracker (aucune erreur).
+                    // Ni index ni serial → ancien système : auto-find du premier tracker (aucune erreur).
                     overriddenAutoFind        = true;
                     overriddenUseSerialFilter = false;
                     Debug.Log($"[VaroniaWeaponTracking] slot={slot} : tracker SteamVR auto-find (premier tracker).");

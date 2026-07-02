@@ -354,6 +354,18 @@ namespace VaroniaBackOffice
                             MessageType.Info
                         );
                     }
+
+                    GUILayout.Space(6);
+                    DrawSeparator(ColorSeparator);
+                    GUILayout.Space(6);
+
+                    var trackerSrcProp = so.FindProperty("defaultTrackerSource");
+                    EditorGUILayout.PropertyField(trackerSrcProp, new GUIContent(
+                        "Default Tracker Source",
+                        "Source de tracking par défaut pour les trackers : Identifier (serial SteamVR) " +
+                        "ou ForceSteamIndex (index SteamVR). Si le champ prioritaire est vide, on retombe " +
+                        "sur l'autre, puis sur l'auto-find du premier tracker."
+                    ));
                 }
             );
 
