@@ -11,6 +11,8 @@ using StrikerLink.Unity.Runtime.Core;
 using StrikerLink.Unity.Runtime.HapticEngine;
 #endif
 
+// Injecte l'input avant la logique de jeu → GetButtonDown fiable la même frame.
+[DefaultExecutionOrder(-100)]
 public class Striker_Weapon : _Weapon
 {
 #if STRIKER_LINK

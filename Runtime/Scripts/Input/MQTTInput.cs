@@ -16,6 +16,8 @@ namespace VBO_Ultimate.Runtime.Scripts.Input
     /// correspond à <see cref="controller"/>, et s'abonne à son Identifier (MAC).
     /// Le weaponIndex utilisé pour VaroniaInput = l'index de ce device dans la liste.
     /// </summary>
+    // Injecte l'input avant la logique de jeu → GetButtonDown fiable la même frame.
+    [DefaultExecutionOrder(-100)]
     public class MQTTInput : MonoBehaviour
     {
         [Tooltip("Type de contrôleur à rechercher dans GlobalConfig.Devices (premier match).")]

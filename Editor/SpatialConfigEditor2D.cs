@@ -132,18 +132,37 @@ namespace VaroniaBackOffice
             if (GUILayout.Button("◀", EditorStyles.toolbarButton, GUILayout.Width(24)))
                 CycleOrtho(-1);
 
-            string orthoLabel = hasOrtho
-                ? $"{Path.GetFileNameWithoutExtension(_orthoFiles[_orthoIdx])}  ·  size {_orthoSizeMeters:0}m"
-                : "(no ortho)";
-            GUILayout.Label(orthoLabel, EditorStyles.toolbarButton, GUILayout.MinWidth(180));
+            string orthoName = "(no ortho)";
+            if (hasOrtho)
+            {
+                string full = _orthoFiles[_orthoIdx];
+                // Chemin relatif au dossier ortho → montre le sous-dossier pour distinguer
+                // deux fichiers de même nom. Custom (hors dossier) → juste le nom de fichier.
+                string rel = (!string.IsNullOrEmpty(_orthoDir) && full.StartsWith(_orthoDir))
+                    ? full.Substring(_orthoDir.Length).TrimStart('/', '\\')
+                    : Path.GetFileName(full);
+                orthoName = Path.ChangeExtension(rel, null);
+            }
+            GUILayout.Label(orthoName, EditorStyles.toolbarButton, GUILayout.MinWidth(140));
 
             if (GUILayout.Button("▶", EditorStyles.toolbarButton, GUILayout.Width(24)))
                 CycleOrtho(+1);
+
+            // Taille ortho (m) éditable — utile pour un ortho custom sans suffixe "_<taille>".
+            GUILayout.Label("size", EditorStyles.miniLabel, GUILayout.Width(28));
+            EditorGUI.BeginChangeCheck();
+            float newOrthoSize = EditorGUILayout.FloatField(_orthoSizeMeters, GUILayout.Width(46));
+            if (EditorGUI.EndChangeCheck()) { _orthoSizeMeters = Mathf.Max(0.1f, newOrthoSize); Repaint(); }
+            GUILayout.Label("m", EditorStyles.miniLabel, GUILayout.Width(14));
 
             GUILayout.Label("Opacity", EditorStyles.miniLabel, GUILayout.Width(50));
             _orthoOpacity = GUILayout.HorizontalSlider(_orthoOpacity, 0f, 1f, GUILayout.Width(90));
 
             GUI.enabled = true;
+
+            // Charger un ortho CUSTOM (n'importe quel fichier jpg/png, hors OrthoSourcePath).
+            if (GUILayout.Button("📂 Custom", EditorStyles.toolbarButton, GUILayout.Width(82)))
+                LoadCustomOrtho();
 
             GUILayout.Space(12);
 
@@ -1872,8 +1891,10 @@ namespace VaroniaBackOffice
 
             try
             {
-                foreach (var f in Directory.GetFiles(dir, "*.jpg", SearchOption.TopDirectoryOnly))
-                    _orthoFiles.Add(f);
+                // Recherche RÉCURSIVE : inclut les sous-dossiers (ex. un dossier par GameID / scène).
+                foreach (var pattern in new[] { "*.jpg", "*.jpeg", "*.png" })
+                    foreach (var f in Directory.GetFiles(dir, pattern, SearchOption.AllDirectories))
+                        _orthoFiles.Add(f);
             }
             catch { }
             _orthoFiles.Sort();
@@ -1892,6 +1913,33 @@ namespace VaroniaBackOffice
             }
             if (pick < 0) pick = 0;
             LoadOrthoAt(pick);
+        }
+
+        /// <summary>
+        /// Charge une vue ortho CUSTOM : l'utilisateur choisit n'importe quel fichier image
+        /// (jpg/png), hors du dossier OrthoSourcePath. Le fichier est ajouté à la liste courante
+        /// et sélectionné (participe au cyclage ◀ ▶ jusqu'au prochain "Reload ortho").
+        /// </summary>
+        private void LoadCustomOrtho()
+        {
+            string start = !string.IsNullOrEmpty(_orthoDir) && Directory.Exists(_orthoDir)
+                ? _orthoDir
+                : Application.dataPath;
+
+            string path = EditorUtility.OpenFilePanel("Charger une vue ortho custom", start, "jpg,jpeg,png");
+            if (string.IsNullOrEmpty(path)) return;
+
+            int idx = _orthoFiles.IndexOf(path);
+            if (idx < 0)
+            {
+                _orthoFiles.Add(path);
+                idx = _orthoFiles.Count - 1;
+            }
+
+            LoadOrthoAt(idx);
+            _showOrtho = true;
+            FitViewToContent();
+            Repaint();
         }
 
         private void LoadOrthoAt(int idx)

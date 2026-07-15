@@ -8,6 +8,8 @@ using VaroniaBackOffice;
 
 namespace VBO_Ultimate.Runtime.Scripts.Input
 {
+    // Injecte l'input avant la logique de jeu (ordre par défaut 0) → GetButtonDown fiable la même frame.
+    [DefaultExecutionOrder(-100)]
     public class MQTT_Weapon : _Weapon
     {
         private bool _needsUpdate = false;

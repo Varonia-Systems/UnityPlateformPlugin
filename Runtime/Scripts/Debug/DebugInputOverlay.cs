@@ -22,6 +22,11 @@ namespace VaroniaBackOffice
         private const float PanelWidth      = 160f; // largeur (x) fixe
         private const float ScreenMargin    = 12f;  // marge depuis le coin bas-droit
         private const float StartY          = 150f; // décalage depuis le bas (place pour un autre debug déjà présent)
+        private const float StackMargin     = 10f;  // marge verticale entre 2 panneaux empilés
+
+        // Registre des overlays actifs. Chaque panneau s'empile au-dessus de ceux d'index d'arme
+        // INFÉRIEUR, selon LEUR hauteur réelle (responsive) + StackMargin — pas d'espace fixe.
+        private static readonly List<DebugInputOverlay> s_overlays = new List<DebugInputOverlay>();
 
         [Header("UI Scale")]
         public float scaleFactor = 1f;
@@ -86,6 +91,7 @@ namespace VaroniaBackOffice
 
         private void OnEnable()
         {
+            if (!s_overlays.Contains(this)) s_overlays.Add(this);
             BackOfficeVaronia.OnMovieChanged += OnMovieChanged;
 #if VBO_UITOOLKIT_OVERLAYS
             BuildOverlay_UITK();
@@ -94,6 +100,7 @@ namespace VaroniaBackOffice
 
         private void OnDisable()
         {
+            s_overlays.Remove(this);
             BackOfficeVaronia.OnMovieChanged -= OnMovieChanged;
 #if VBO_UITOOLKIT_OVERLAYS
             if (_panelSettings != null)
@@ -202,7 +209,7 @@ namespace VaroniaBackOffice
         {
             if (_panel == null) return;
 
-            // Repositionne chaque frame selon la hauteur live des panneaux d'index inférieur.
+            // Repositionne chaque frame (empilé verticalement par index d'arme).
             PositionPanel_UITK();
 
             // Title — change rarement, compare strings ref-first
@@ -428,13 +435,30 @@ namespace VaroniaBackOffice
         {
             if (_panel == null) return;
 
-            // Position fixe en bas à droite, décalée de StartY vers le haut pour ne pas recouvrir
-            // le debug déjà présent dans le coin. Pas d'empilement.
+            // Empilé au-dessus des panneaux d'index d'arme inférieur, selon LEUR hauteur RÉELLE
+            // (resolvedStyle live) + StackMargin. Responsive : aucun espace fixe.
+            float bottom = StartY;
+            for (int i = 0; i < s_overlays.Count; i++)
+            {
+                var o = s_overlays[i];
+                if (o == null || o == this) continue;
+                if (o._weaponIndex < _weaponIndex)
+                    bottom += o.ResolvedPanelHeightUITK() + StackMargin;
+            }
+
             _panel.style.width  = PanelWidth * scaleFactor;
             _panel.style.right  = ScreenMargin;
-            _panel.style.bottom = StartY;
+            _panel.style.bottom = bottom;
             _panel.style.left   = StyleKeyword.Auto;
             _panel.style.top    = StyleKeyword.Auto;
+        }
+
+        /// <summary>Hauteur réelle du panneau (layout live). 0 si pas encore construit/mesuré.</summary>
+        private float ResolvedPanelHeightUITK()
+        {
+            if (_panel == null) return 0f;
+            float h = _panel.resolvedStyle.height;
+            return (float.IsNaN(h) || h <= 0f) ? 0f : h;
         }
 #endif // VBO_UITOOLKIT_OVERLAYS
 
@@ -561,12 +585,22 @@ namespace VaroniaBackOffice
 
         private Rect GetPanelRect(float scale)
         {
-            // Position fixe bas-droite, décalée de StartY pour ne pas recouvrir le debug du coin.
-            // Hauteur dynamique selon le contenu ; pas d'empilement (plus de décalage par _weaponIndex).
+            // Empilé au-dessus des panneaux d'index d'arme inférieur, selon LEUR hauteur RÉELLE
+            // (ComputeContentHeightIMGUI, même scale) + StackMargin. Responsive.
             float w = PanelWidth * scale, h = ComputeContentHeightIMGUI(scale);
             float m = ScreenMargin * scale;
+
+            float stack = 0f;
+            for (int i = 0; i < s_overlays.Count; i++)
+            {
+                var o = s_overlays[i];
+                if (o == null || o == this) continue;
+                if (o._weaponIndex < _weaponIndex)
+                    stack += o.ComputeContentHeightIMGUI(scale) + StackMargin * scale;
+            }
+
             float x = Screen.width  - w - m;
-            float y = Screen.height - h - m - StartY * scale;
+            float y = Screen.height - h - m - (StartY * scale) - stack;
             return new Rect(x, y, w, h);
         }
 

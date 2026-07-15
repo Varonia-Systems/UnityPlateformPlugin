@@ -8,6 +8,8 @@ using VBO_Ultimate.Runtime.Scripts.Input;
 using Valve.VR;
 #endif
 
+// Injecte l'input avant la logique de jeu → GetButtonDown fiable la même frame.
+[DefaultExecutionOrder(-100)]
 public class Vortex_Weapon : _Weapon
 {
     [Header("Live Data")]

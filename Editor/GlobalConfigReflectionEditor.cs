@@ -724,11 +724,24 @@ namespace VaroniaBackOffice
                 string identifierPlaceholder = identifierDisabled
                     ? "(disabled — Force Steam set)"
                     : (entry.Identifier ?? "");
-                string nextIdentifier = EditorGUILayout.TextField(identifierPlaceholder);
+                // DelayedTextField : ne valide qu'à la validation (Entrée / perte de focus),
+                // donc une seule transition ancien→nouveau → le suivi des enfants est fiable
+                // (pas de désync caractère-par-caractère).
+                string nextIdentifier = EditorGUILayout.DelayedTextField(identifierPlaceholder);
                 if (EditorGUI.EndChangeCheck() && !identifierDisabled)
                 {
+                    string oldId = entry.Identifier ?? "";
                     entry.Identifier = nextIdentifier;
                     _isDirty = true;
+
+                    // Renommer l'Identifier d'un papa → on suit les enfants pour ne pas casser le lien :
+                    // tout device qui pointait sur l'ancien Identifier repointé sur le nouveau.
+                    if (!string.IsNullOrEmpty(oldId) && oldId != nextIdentifier)
+                    {
+                        foreach (var d in list)
+                            if (d != null && d != entry && d.LinkParent == oldId)
+                                d.LinkParent = nextIdentifier;
+                    }
                 }
                 GUI.enabled = true;
 

@@ -260,8 +260,10 @@ namespace VaroniaBackOffice
 
         // États de boutons par arme : _states[weaponIndex][buttonIndex]
         private static bool[][] _states     = new bool[1][] { new bool[4] };
-        private static bool[][] _lastStates = new bool[1][] { new bool[4] };
-        private static int[]    _lastFrame  = new int[1];
+        // Frame de la dernière transition (down/up) par bouton → GetButtonDown/Up fiables,
+        // indépendants de l'ordre d'appel (plus de snapshot "last states" fragile).
+        private static int[][]  _downFrame  = new int[1][] { new int[4] { -1, -1, -1, -1 } };
+        private static int[][]  _upFrame    = new int[1][] { new int[4] { -1, -1, -1, -1 } };
 
         // Télémétrie par arme
         private static bool[]   _isConnected = new bool[1];
@@ -280,7 +282,6 @@ namespace VaroniaBackOffice
         /// <summary> Retourne true si le bouton de l'arme donnée est enfoncé. </summary>
         public static bool GetButton(int weaponIndex, VaroniaButton button)
         {
-            UpdateLastStates(weaponIndex);
             if (weaponIndex < 0 || weaponIndex >= _states.Length) return false;
             return _states[weaponIndex][(int)button];
         }
@@ -291,10 +292,8 @@ namespace VaroniaBackOffice
         /// <summary> Retourne true durant la frame où le bouton de l'arme donnée est enfoncé. </summary>
         public static bool GetButtonDown(int weaponIndex, VaroniaButton button)
         {
-            UpdateLastStates(weaponIndex);
-            if (weaponIndex < 0 || weaponIndex >= _states.Length) return false;
-            int idx = (int)button;
-            return _states[weaponIndex][idx] && !_lastStates[weaponIndex][idx];
+            if (weaponIndex < 0 || weaponIndex >= _downFrame.Length) return false;
+            return _downFrame[weaponIndex][(int)button] == Time.frameCount;
         }
 
         /// <summary> Retourne true durant la frame où le bouton de l'arme par défaut est relâché. </summary>
@@ -303,21 +302,8 @@ namespace VaroniaBackOffice
         /// <summary> Retourne true durant la frame où le bouton de l'arme donnée est relâché. </summary>
         public static bool GetButtonUp(int weaponIndex, VaroniaButton button)
         {
-            UpdateLastStates(weaponIndex);
-            if (weaponIndex < 0 || weaponIndex >= _states.Length) return false;
-            int idx = (int)button;
-            return !_states[weaponIndex][idx] && _lastStates[weaponIndex][idx];
-        }
-
-        private static void UpdateLastStates(int weaponIndex)
-        {
-            if (weaponIndex < 0 || weaponIndex >= WeaponCount) return;
-            int currentFrame = Time.frameCount;
-            if (_lastFrame[weaponIndex] != currentFrame)
-            {
-                System.Array.Copy(_states[weaponIndex], _lastStates[weaponIndex], _states[weaponIndex].Length);
-                _lastFrame[weaponIndex] = currentFrame;
-            }
+            if (weaponIndex < 0 || weaponIndex >= _upFrame.Length) return false;
+            return _upFrame[weaponIndex][(int)button] == Time.frameCount;
         }
 
    
@@ -436,8 +422,8 @@ namespace VaroniaBackOffice
         {
             WeaponCount  = count;
             _states      = new bool[count][];
-            _lastStates  = new bool[count][];
-            _lastFrame   = new int[count];
+            _downFrame   = new int[count][];
+            _upFrame     = new int[count][];
             _isConnected = new bool[count];
             _battery     = new int[count];
             _rssi        = new float[count];
@@ -445,9 +431,9 @@ namespace VaroniaBackOffice
             _model       = new string[count];
             for (int i = 0; i < count; i++)
             {
-                _states[i]     = new bool[4];
-                _lastStates[i] = new bool[4];
-                _lastFrame[i]  = -1;
+                _states[i]    = new bool[4];
+                _downFrame[i] = new int[4] { -1, -1, -1, -1 };
+                _upFrame[i]   = new int[4] { -1, -1, -1, -1 };
             }
         }
 
@@ -464,8 +450,8 @@ namespace VaroniaBackOffice
             {
                 int newCount = index + 1;
                 System.Array.Resize(ref _states,      newCount);
-                System.Array.Resize(ref _lastStates,  newCount);
-                System.Array.Resize(ref _lastFrame,   newCount);
+                System.Array.Resize(ref _downFrame,   newCount);
+                System.Array.Resize(ref _upFrame,     newCount);
                 System.Array.Resize(ref _isConnected, newCount);
                 System.Array.Resize(ref _battery,     newCount);
                 System.Array.Resize(ref _rssi,        newCount);
@@ -473,9 +459,9 @@ namespace VaroniaBackOffice
                 System.Array.Resize(ref _model,       newCount);
                 for (int i = WeaponCount; i < newCount; i++)
                 {
-                    _states[i]     = new bool[4];
-                    _lastStates[i] = new bool[4];
-                    _lastFrame[i]  = -1;
+                    _states[i]    = new bool[4];
+                    _downFrame[i] = new int[4] { -1, -1, -1, -1 };
+                    _upFrame[i]   = new int[4] { -1, -1, -1, -1 };
                 }
                 WeaponCount = newCount;
             }
@@ -503,6 +489,10 @@ namespace VaroniaBackOffice
             if (_states[weaponIndex][idx] == pressed) return;
 
             _states[weaponIndex][idx] = pressed;
+
+            // Horodatage de la transition (frame courante) → GetButtonDown/Up fiables cette frame.
+            if (pressed) _downFrame[weaponIndex][idx] = Time.frameCount;
+            else         _upFrame[weaponIndex][idx]   = Time.frameCount;
 
 #if ENABLE_INPUT_SYSTEM
             VaroniaDevice.SetButtonState(weaponIndex, button, pressed, _states[weaponIndex]);
