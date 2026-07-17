@@ -20,6 +20,8 @@ namespace VaroniaBackOffice
     {
         public static BackOfficeVaronia Instance { get; private set; }
         public static event Action OnConfigLoaded;
+        /// <summary>Vrai dès que la config a été chargée (permet aux abonnés tardifs de rattraper l'événement).</summary>
+        public static bool ConfigLoaded { get; private set; }
         public static event Action OnMovieChanged;
         public static void RaiseMovieChanged() => OnMovieChanged?.Invoke();
 
@@ -563,6 +565,7 @@ namespace VaroniaBackOffice
             VaroniaWeaponRegistry.Build(config);
             _runtimeErrors.Clear();
 
+            ConfigLoaded = true;
             OnConfigLoaded?.Invoke();
         }
 

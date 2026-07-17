@@ -18,14 +18,20 @@ namespace VaroniaBackOffice
 {
     public class DebugInputOverlay : MonoBehaviour
     {
-        // Panneau toujours ancré en bas à droite ; largeur fixe, hauteur dynamique (UITK).
-        private const float PanelWidth      = 160f; // largeur (x) fixe
-        private const float ScreenMargin    = 12f;  // marge depuis le coin bas-droit
-        private const float StartY          = 150f; // décalage depuis le bas (place pour un autre debug déjà présent)
-        private const float StackMargin     = 10f;  // marge verticale entre 2 panneaux empilés
+        // Panneau toujours ancré en bas à droite ; largeur/taille fixes.
+        // Réglables dans l'inspecteur pour ajuster finement le placement des panneaux d'armes.
+        [Header("Layout (placement)")]
+        [Tooltip("Largeur fixe du panneau (px).")]
+        [SerializeField] private float PanelWidth   = 160f;
+        [Tooltip("Marge fixe depuis le bord droit de l'écran (px).")]
+        [SerializeField] private float ScreenMargin = 12f;
+        [Tooltip("Décalage du bas du 1er panneau depuis le bas de l'écran (px) = marge fixe bas-droit.")]
+        [SerializeField] private float StartY       = 150f;
+        [Tooltip("Espace vertical entre deux panneaux empilés (px). Mets-le petit pour les coller à la suite.")]
+        [SerializeField] private float StackMargin  = 6f;
 
         // Registre des overlays actifs. Chaque panneau s'empile au-dessus de ceux d'index d'arme
-        // INFÉRIEUR, selon LEUR hauteur réelle (responsive) + StackMargin — pas d'espace fixe.
+        // INFÉRIEUR, selon LEUR hauteur réelle + StackMargin.
         private static readonly List<DebugInputOverlay> s_overlays = new List<DebugInputOverlay>();
 
         [Header("UI Scale")]
@@ -168,10 +174,16 @@ namespace VaroniaBackOffice
                 _mouseMiddle = Input.GetMouseButton(2);
                 _mouseScroll = Mathf.Abs(Input.mouseScrollDelta.y) > 0.01f;
 #endif
-                VaroniaInput.SetButton(_weaponIndex, VaroniaButton.Primary,    _mouseLeft);
-                VaroniaInput.SetButton(_weaponIndex, VaroniaButton.Secondary,  _mouseRight);
-                VaroniaInput.SetButton(_weaponIndex, VaroniaButton.Tertiary,   _mouseMiddle);
-                VaroniaInput.SetButton(_weaponIndex, VaroniaButton.Quaternary, _mouseScroll);
+                // On ne pilote une arme QUE si l'index est réellement résolu. Sinon (ex : source
+                // MQTTInput non résolue car Identifier vide → cas HMD), _weaponIndex vaut 0 par
+                // défaut et on tirerait l'arme 0 (le HK) sous le label d'un AUTRE device. Cross-talk.
+                if (_indexResolved)
+                {
+                    VaroniaInput.SetButton(_weaponIndex, VaroniaButton.Primary,    _mouseLeft);
+                    VaroniaInput.SetButton(_weaponIndex, VaroniaButton.Secondary,  _mouseRight);
+                    VaroniaInput.SetButton(_weaponIndex, VaroniaButton.Tertiary,   _mouseMiddle);
+                    VaroniaInput.SetButton(_weaponIndex, VaroniaButton.Quaternary, _mouseScroll);
+                }
             }
 
 #if VBO_UITOOLKIT_OVERLAYS
@@ -222,10 +234,13 @@ namespace VaroniaBackOffice
 
             // Boutons — pas de string alloc, mais on évite quand même de re-set la couleur identique
             bool isDebug = DebugModeOverlay.IsDebugMode;
-            bool b0 = isDebug ? _mouseLeft   : VaroniaInput.GetButton(_weaponIndex, VaroniaButton.Primary);
-            bool b1 = isDebug ? _mouseRight  : VaroniaInput.GetButton(_weaponIndex, VaroniaButton.Secondary);
-            bool b2 = isDebug ? _mouseMiddle : VaroniaInput.GetButton(_weaponIndex, VaroniaButton.Tertiary);
-            bool b3 = isDebug ? _mouseScroll : VaroniaInput.GetButton(_weaponIndex, VaroniaButton.Quaternary);
+            // Tant que l'index n'est pas résolu (_weaponIndex=0 par défaut), on n'affiche PAS
+            // l'état de l'arme 0 : sinon un panneau non résolu (ex HMD à Identifier vide) refléterait
+            // le tir de l'arme du slot 0 (le HK) → fausse "détection" sur le mauvais device.
+            bool b0 = _indexResolved && (isDebug ? _mouseLeft   : VaroniaInput.GetButton(_weaponIndex, VaroniaButton.Primary));
+            bool b1 = _indexResolved && (isDebug ? _mouseRight  : VaroniaInput.GetButton(_weaponIndex, VaroniaButton.Secondary));
+            bool b2 = _indexResolved && (isDebug ? _mouseMiddle : VaroniaInput.GetButton(_weaponIndex, VaroniaButton.Tertiary));
+            bool b3 = _indexResolved && (isDebug ? _mouseScroll : VaroniaInput.GetButton(_weaponIndex, VaroniaButton.Quaternary));
             UpdateBtn(0, b0, isDebug);
             UpdateBtn(1, b1, isDebug);
             UpdateBtn(2, b2, isDebug);
@@ -435,20 +450,27 @@ namespace VaroniaBackOffice
         {
             if (_panel == null) return;
 
-            // Empilé au-dessus des panneaux d'index d'arme inférieur, selon LEUR hauteur RÉELLE
-            // (resolvedStyle live) + StackMargin. Responsive : aucun espace fixe.
+            // Taille FIXE (pas de scaling résolution). On empile les panneaux d'index d'arme inférieur
+            // au-dessus de celui-ci, collés à la suite (hauteur réelle + petit StackMargin), le tout
+            // ancré sur la marge fixe du coin bas-droit.
+            int myIdx = s_overlays.IndexOf(this);
             float bottom = StartY;
             for (int i = 0; i < s_overlays.Count; i++)
             {
                 var o = s_overlays[i];
                 if (o == null || o == this) continue;
-                if (o._weaponIndex < _weaponIndex)
+                // Empile sous celui-ci les panneaux d'index d'arme inférieur ; en cas d'égalité d'index
+                // (3 devices reconstruits pouvant partager un index), on départage par ordre d'enregistrement
+                // pour qu'ils s'empilent "à la suite" au lieu de se superposer.
+                bool below = o._weaponIndex < _weaponIndex
+                          || (o._weaponIndex == _weaponIndex && i < myIdx);
+                if (below)
                     bottom += o.ResolvedPanelHeightUITK() + StackMargin;
             }
 
-            _panel.style.width  = PanelWidth * scaleFactor;
-            _panel.style.right  = ScreenMargin;
-            _panel.style.bottom = bottom;
+            _panel.style.width  = PanelWidth;
+            _panel.style.right  = ScreenMargin;   // marge fixe droite
+            _panel.style.bottom = bottom;         // marge fixe bas + empilement
             _panel.style.left   = StyleKeyword.Auto;
             _panel.style.top    = StyleKeyword.Auto;
         }
@@ -496,14 +518,18 @@ namespace VaroniaBackOffice
             float btnSpacing = (W - 20f * scale - btnSize * 4f) / 3f;
 
             string[] labels = { "1", "2", "3", "4" };
-            bool[] states = DebugModeOverlay.IsDebugMode
-                ? new bool[] { _mouseLeft, _mouseRight, _mouseMiddle, _mouseScroll }
-                : new bool[] {
-                    VaroniaInput.GetButton(_weaponIndex, VaroniaButton.Primary),
-                    VaroniaInput.GetButton(_weaponIndex, VaroniaButton.Secondary),
-                    VaroniaInput.GetButton(_weaponIndex, VaroniaButton.Tertiary),
-                    VaroniaInput.GetButton(_weaponIndex, VaroniaButton.Quaternary)
-                };
+            // Index non résolu (_weaponIndex=0 par défaut) → on n'affiche PAS l'état de l'arme 0,
+            // sinon un panneau non résolu (ex HMD à Identifier vide) refléterait le tir du HK (slot 0).
+            bool[] states = !_indexResolved
+                ? new bool[4]
+                : DebugModeOverlay.IsDebugMode
+                    ? new bool[] { _mouseLeft, _mouseRight, _mouseMiddle, _mouseScroll }
+                    : new bool[] {
+                        VaroniaInput.GetButton(_weaponIndex, VaroniaButton.Primary),
+                        VaroniaInput.GetButton(_weaponIndex, VaroniaButton.Secondary),
+                        VaroniaInput.GetButton(_weaponIndex, VaroniaButton.Tertiary),
+                        VaroniaInput.GetButton(_weaponIndex, VaroniaButton.Quaternary)
+                    };
 
             for (int i = 0; i < 4; i++)
             {
@@ -590,12 +616,15 @@ namespace VaroniaBackOffice
             float w = PanelWidth * scale, h = ComputeContentHeightIMGUI(scale);
             float m = ScreenMargin * scale;
 
+            int myIdx = s_overlays.IndexOf(this);
             float stack = 0f;
             for (int i = 0; i < s_overlays.Count; i++)
             {
                 var o = s_overlays[i];
                 if (o == null || o == this) continue;
-                if (o._weaponIndex < _weaponIndex)
+                bool below = o._weaponIndex < _weaponIndex
+                          || (o._weaponIndex == _weaponIndex && i < myIdx);
+                if (below)
                     stack += o.ComputeContentHeightIMGUI(scale) + StackMargin * scale;
             }
 
