@@ -212,6 +212,8 @@ namespace VaroniaBackOffice
                         return RemapKnownAlias(sb.ToString());
                 }
             }
+            // Sonde OpenVR : échec attendu si SteamVR n'est pas lancé/présent. On retombe sur
+            // InputDevices juste en dessous → silence volontaire, pas une erreur à signaler.
             catch { }
 #endif
             var headsets = new List<InputDevice>();

@@ -64,6 +64,23 @@ namespace VBO_Ultimate.Runtime.Scripts.UI
         public static bool IsRatingDisplayed = false;
         public bool debugStart = false; // Si true, l'UI est active dès le début
 
+        [Header("Gaze Fallback (jeux sans arme / hand tracking)")]
+        [Tooltip("Si aucune VaroniaWeapon n'est disponible, la sélection se fait au regard : fixer une étoile la charge puis la valide.")]
+        public bool useGazeWhenNoWeapon = true;
+        [Tooltip("Durée de fixation du regard pour valider une étoile.")]
+        public float gazeHoldTime = 1.2f;
+
+        [Header("Fixed Placement (optionnel)")]
+        [Tooltip("Si assigné, le panneau est ANCRÉ à ce transform (position/rotation) au lieu de suivre la caméra. " +
+                 "Idéal en mode regard : le panneau vit dans le décor.")]
+        public Transform fixedAnchor;
+        [Tooltip("Taille du réticule (en unités du canvas) affiché là où le regard croise le panneau.")]
+        public float crosshairSize = 26f;
+
+        [Tooltip("Zone (en unités du canvas, centrée) dans laquelle le réticule du regard apparaît. " +
+                 "Plus petite que le rect logique du canvas pour ne pas afficher le point trop loin du panneau.")]
+        public Vector2 crosshairZone = new Vector2(300f, 160f);
+
         [Header("Interaction Settings")]
         public float selectionHoldTime = 0.5f; // Temps de maintien nécessaire
         public float laserActivationHitboxTolerance = 5.0f; // Hitbox encore plus large pour l'activation du laser
@@ -148,7 +165,14 @@ namespace VBO_Ultimate.Runtime.Scripts.UI
             }
             else
             {
-                ShowRating(false);
+                // État initial : caché INSTANTANÉMENT — pas de fade au boot.
+                // (isVisible peut arriver sérialisé à true depuis le prefab : passer par
+                //  ShowRating(false) jouerait alors le FadeOutAndHide pendant que
+                //  FollowCamera affiche l'UI devant la caméra → flash au lancement.)
+                isVisible = false;
+                IsRatingDisplayed = false;
+                if (_canvasRoot != null) _canvasRoot.SetActive(false);
+                if (_lineRenderer != null) _lineRenderer.enabled = false;
             }
         }
 
@@ -382,6 +406,19 @@ namespace VBO_Ultimate.Runtime.Scripts.UI
             tyTextRect.sizeDelta = Vector2.zero;
 
             thankYouPanel.SetActive(false);
+
+            // Réticule du mode regard : apparaît là où le regard croise le panneau,
+            // pour que le joueur comprenne immédiatement où il vise.
+            GameObject chObj = new GameObject("GazeCrosshair");
+            chObj.transform.SetParent(_canvasRoot.transform, false);
+            _crosshairRect = chObj.AddComponent<RectTransform>();
+            _crosshairRect.sizeDelta = new Vector2(crosshairSize, crosshairSize);
+            _crosshair = chObj.AddComponent<Image>();
+            _crosshair.sprite = GetSoftDotSprite(); // point net + halo en fondu, généré procéduralement
+            _crosshair.color = new Color(1f, 1f, 1f, 0.85f);
+            _crosshair.raycastTarget = false;
+            chObj.transform.SetAsLastSibling(); // toujours dessiné au-dessus des étoiles
+            chObj.SetActive(false);
         }
 
         private void UpdateLaserGradient(float alpha)
@@ -407,12 +444,28 @@ namespace VBO_Ultimate.Runtime.Scripts.UI
                 else return;
             }
 
-            // Positionnement devant la caméra
-            Vector3 targetPos = _targetCamera.position + _targetCamera.forward * followDistance;
-            _canvasRoot.transform.position = Vector3.Lerp(_canvasRoot.transform.position, targetPos, Time.deltaTime * followSpeed);
-            
-            // Regarder la caméra
-            _canvasRoot.transform.LookAt(_canvasRoot.transform.position + (_canvasRoot.transform.position - _targetCamera.position));
+            // Mode ancré : le panneau vit à un endroit FIXE du décor (position/rotation de l'ancre).
+            if (fixedAnchor != null)
+            {
+                _canvasRoot.transform.SetPositionAndRotation(fixedAnchor.position, fixedAnchor.rotation);
+                float anchoredScale = 1f / 65f;
+                _canvasRoot.transform.localScale = Vector3.Lerp(_canvasRoot.transform.localScale,
+                    Vector3.one * anchoredScale, Time.deltaTime * 10f);
+                return;
+            }
+
+            // Positionnement devant la caméra.
+            // En mode regard : on FIGE le panneau tant qu'une étoile est visée — sinon le
+            // recentrage ferait fuir l'étoile que le joueur essaie de fixer (dwell impossible).
+            bool freezeForGaze = _gazeMode && hoveredRating > 0 && !isShowingThankYou;
+            if (!freezeForGaze)
+            {
+                Vector3 targetPos = _targetCamera.position + _targetCamera.forward * followDistance;
+                _canvasRoot.transform.position = Vector3.Lerp(_canvasRoot.transform.position, targetPos, Time.deltaTime * followSpeed);
+
+                // Regarder la caméra
+                _canvasRoot.transform.LookAt(_canvasRoot.transform.position + (_canvasRoot.transform.position - _targetCamera.position));
+            }
 
             // Effet de spawn (scale up)
             float targetScale = 1f / 65f;
@@ -428,14 +481,22 @@ namespace VBO_Ultimate.Runtime.Scripts.UI
                 return;
             }
 
-            if (VaroniaWeapon.Instance == null || VaroniaWeapon.Instance.currentweapons.Count == 0) return;
+            // Pas d'arme (jeu hand tracking ?) -> interaction au regard.
+            bool hasWeapon = VaroniaWeapon.Instance != null
+                          && VaroniaWeapon.Instance.currentweapons.Count > 0
+                          && VaroniaWeapon.Instance.currentweapons[0] != null
+                          && VaroniaWeapon.Instance.currentweapons[0].beginRaycast != null;
 
-            _Weapon weapon0 = VaroniaWeapon.Instance.currentweapons[0];
-            if (weapon0 == null || weapon0.beginRaycast == null)
+            if (!hasWeapon)
             {
                 if (_lineRenderer != null) _lineRenderer.enabled = false;
+                _gazeMode = true;
+                if (useGazeWhenNoWeapon) HandleGazeInteraction();
                 return;
             }
+            _gazeMode = false;
+
+            _Weapon weapon0 = VaroniaWeapon.Instance.currentweapons[0];
 
             Ray ray = new Ray(weapon0.beginRaycast.position, weapon0.beginRaycast.forward);
             
@@ -596,6 +657,145 @@ namespace VBO_Ultimate.Runtime.Scripts.UI
             }
         }
 
+        private bool _gazeMode;
+        private Image _crosshair;
+        private RectTransform _crosshairRect;
+
+        // Réticule "point + halo" généré à la volée : un centre net qui fond
+        // progressivement vers l'extérieur (pas de dépendance à un sprite).
+        private static Sprite _softDotSprite;
+        private static Sprite GetSoftDotSprite()
+        {
+            if (_softDotSprite != null) return _softDotSprite;
+
+            const int S = 64;
+            var tex = new Texture2D(S, S, TextureFormat.RGBA32, false)
+            {
+                hideFlags = HideFlags.HideAndDontSave,
+                wrapMode = TextureWrapMode.Clamp,
+                filterMode = FilterMode.Bilinear
+            };
+
+            // smoothstep façon HLSL (edge0, edge1, x) — ATTENTION : Mathf.SmoothStep(a,b,t)
+            // de Unity interpole entre a et b, ce n'est PAS la même fonction (ça donnait
+            // un carré d'alpha quasi uniforme au lieu d'un point).
+            float Smooth(float e0, float e1, float x)
+            {
+                float t = Mathf.Clamp01((x - e0) / (e1 - e0));
+                return t * t * (3f - 2f * t);
+            }
+
+            for (int y = 0; y < S; y++)
+            for (int x = 0; x < S; x++)
+            {
+                float dx = (x + 0.5f) / S - 0.5f;
+                float dy = (y + 0.5f) / S - 0.5f;
+                float r = Mathf.Sqrt(dx * dx + dy * dy) * 2f;    // 0 centre .. 1 bord
+
+                float core = 1f - Smooth(0.16f, 0.34f, r);       // point net
+                float halo = (1f - Smooth(0.20f, 1.00f, r)) * 0.35f; // halo en fondu
+                tex.SetPixel(x, y, new Color(1f, 1f, 1f, Mathf.Clamp01(core + halo)));
+            }
+            tex.Apply();
+
+            _softDotSprite = Sprite.Create(tex, new Rect(0, 0, S, S), new Vector2(0.5f, 0.5f));
+            _softDotSprite.hideFlags = HideFlags.HideAndDontSave;
+            return _softDotSprite;
+        }
+
+        /// <summary>
+        /// Sélection au regard (dwell) : le rayon part de la caméra ; fixer la même
+        /// étoile pendant gazeHoldTime la valide. Aucun bouton ni arme nécessaire.
+        /// </summary>
+        private void HandleGazeInteraction()
+        {
+            if (_targetCamera == null) return;
+
+            Ray ray = new Ray(_targetCamera.position, _targetCamera.forward);
+
+            hoveredRating = 0;
+            float closestDist = float.MaxValue;
+            bool inPanelZone = false;
+            Plane p = new Plane(_canvasRoot.transform.forward, _canvasRoot.transform.position);
+            if (p.Raycast(ray, out float enter))
+            {
+                Vector3 worldPoint = ray.GetPoint(enter);
+                for (int i = 0; i < _starRects.Count; i++)
+                {
+                    Vector3 localPoint = _starRects[i].InverseTransformPoint(worldPoint);
+                    Rect r = _starRects[i].rect;
+                    Vector2 sz = r.size * hitboxTolerance;
+                    Rect hitbox = new Rect(r.center - sz * 0.5f, sz);
+                    if (hitbox.Contains(localPoint) && enter < closestDist)
+                    {
+                        closestDist = enter;
+                        hoveredRating = i + 1;
+                    }
+                }
+
+                // Réticule : visible dès que le regard tombe dans la zone crosshairZone
+                // (centrée sur le panneau), positionné pile au point visé.
+                RectTransform canvasRect = _canvasRoot.GetComponent<RectTransform>();
+                Vector3 canvasLocal = canvasRect.InverseTransformPoint(worldPoint);
+                inPanelZone = new Rect(-crosshairZone * 0.5f, crosshairZone).Contains(canvasLocal);
+
+                if (_crosshair != null)
+                {
+                    if (inPanelZone)
+                    {
+                        if (!_crosshair.gameObject.activeSelf) _crosshair.gameObject.SetActive(true);
+                        _crosshairRect.anchoredPosition = new Vector2(canvasLocal.x, canvasLocal.y);
+
+                        // feedback : blanc en balade, jaune qui grossit pendant la charge
+                        float progress = hoveredRating > 0 ? Mathf.Clamp01(_currentHoldTimer / gazeHoldTime) : 0f;
+                        _crosshair.color = Color.Lerp(new Color(1f, 1f, 1f, 0.85f), filledColor, progress);
+                        _crosshairRect.sizeDelta = Vector2.one * crosshairSize * (1f + progress * 0.6f);
+                    }
+                    else _crosshair.gameObject.SetActive(false);
+                }
+            }
+            else if (_crosshair != null) _crosshair.gameObject.SetActive(false);
+
+            if (hoveredRating > 0)
+            {
+                if (_lastInteractingStar != hoveredRating)
+                {
+                    _lastInteractingStar = hoveredRating;
+                    _currentHoldTimer = 0f;
+                    PlaySound(hoverSound, hoverVolume);
+                }
+
+                _currentHoldTimer += Time.deltaTime;
+
+                // même feedback sonore de charge que le mode arme
+                if (chargeSound != null && _chargeAudioSource != null)
+                {
+                    if (!_chargeAudioSource.isPlaying)
+                    {
+                        _chargeAudioSource.clip = chargeSound;
+                        _chargeAudioSource.Play();
+                    }
+                    float progress = Mathf.Clamp01(_currentHoldTimer / gazeHoldTime);
+                    _chargeAudioSource.volume = chargeVolume * progress;
+                    _chargeAudioSource.pitch = Mathf.Lerp(chargePitchStart, chargePitchEnd, progress);
+                }
+
+                if (_currentHoldTimer >= gazeHoldTime)
+                {
+                    StopChargeSound();
+                    SetRating(hoveredRating);
+                    _currentHoldTimer = 0f;
+                }
+            }
+            else
+            {
+                StopChargeSound();
+                if (_currentHoldTimer > 0) PlaySound(cancelSound, cancelVolume);
+                _lastInteractingStar = 0;
+                _currentHoldTimer = 0f;
+            }
+        }
+
         private void StopChargeSound()
         {
             if (_chargeAudioSource != null && _chargeAudioSource.isPlaying)
@@ -649,7 +849,7 @@ namespace VBO_Ultimate.Runtime.Scripts.UI
                     // Si c'est l'étoile en train d'être chargée, on ajoute un feedback sur l'échelle
                     if (starIndex == hoveredRating && _currentHoldTimer > 0)
                     {
-                        float progress = _currentHoldTimer / selectionHoldTime;
+                        float progress = _currentHoldTimer / (_gazeMode ? gazeHoldTime : selectionHoldTime);
                         targetScale += progress * 0.3f; // Elle grossit encore plus
                         targetColor = Color.Lerp(targetColor, filledColor, progress); // Elle jaunit
                         targetSprite = _starFilledSprite;
@@ -669,6 +869,18 @@ namespace VBO_Ultimate.Runtime.Scripts.UI
 
             currentRating = rating;
             Debug.Log($"[Rating3DUI] Utilisateur a noté : {rating} étoiles");
+
+            // Persistance + envoi back-office (une seule fois par notation, protégé par _isProcessingSelection).
+            if (BackOfficeVaronia.Instance != null)
+            {
+                // Historique local : ajoute {date, note} dans Rating.json (même dossier que GlobalConfig.json).
+                BackOfficeVaronia.Instance.AppendRating(rating);
+
+                // Envoi MQTT (même logique que SetScore/SetSoftState).
+                if (BackOfficeVaronia.Instance.mqttClient != null)
+                    BackOfficeVaronia.Instance.mqttClient.SetRating(rating);
+            }
+
             PlaySound(successSound, successVolume);
             
             // Animation de feedback
@@ -691,8 +903,9 @@ namespace VBO_Ultimate.Runtime.Scripts.UI
             // Commencer le fade out du panneau principal
             StartCoroutine(FadeOutMainPanel());
 
-            // Désactiver le laser
+            // Désactiver le laser et le réticule
             if (_lineRenderer != null) _lineRenderer.enabled = false;
+            if (_crosshair != null) _crosshair.gameObject.SetActive(false);
             StopChargeSound();
 
             // Afficher le panneau de remerciement avec animation
@@ -886,6 +1099,7 @@ namespace VBO_Ultimate.Runtime.Scripts.UI
             isVisible = false;
             if (_canvasRoot != null) _canvasRoot.SetActive(false);
             if (_lineRenderer != null) _lineRenderer.enabled = false;
+            if (_crosshair != null) _crosshair.gameObject.SetActive(false);
             StopChargeSound();
         }
 
@@ -899,6 +1113,18 @@ namespace VBO_Ultimate.Runtime.Scripts.UI
         public static void ToggleRating()
         {
             if (Instance != null) Instance.ShowRating(!Instance.isVisible);
+        }
+
+        /// <summary>
+        /// Affiche la notation ANCRÉE à un point fixe du décor (mode regard + réticule).
+        /// Passe null pour revenir au comportement "suit la caméra".
+        /// </summary>
+        public void ShowRatingAt(Transform anchor)
+        {
+            fixedAnchor = anchor;
+            if (anchor != null && _canvasRoot != null)
+                _canvasRoot.transform.SetPositionAndRotation(anchor.position, anchor.rotation);
+            ShowRating(true);
         }
     }
 }

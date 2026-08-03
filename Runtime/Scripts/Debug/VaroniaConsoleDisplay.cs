@@ -202,9 +202,13 @@ namespace VaroniaBackOffice
 
             lock (_earlyEntries)
             {
-                foreach (var e in _earlyEntries)
+                // _entries est protégé par _lock partout ailleurs (handler threadé + thread lecteur) :
+                // on prend le bon verrou ici aussi, au lieu de s'appuyer sur l'ordre d'initialisation.
+                lock (_lock)
                 {
-                    _entries.Add(e);
+                    foreach (var e in _earlyEntries)
+                        _entries.Add(e);
+                    TrimEntries();
                 }
                 _earlyEntries.Clear();
             }
@@ -234,10 +238,17 @@ namespace VaroniaBackOffice
             lock (_lock)
             {
                 _entries.Add(entry);
-                if (_entries.Count > maxEntries)
-                    _entries.RemoveAt(0);
+                TrimEntries();
                 _dirty = true;
             }
+        }
+
+        /// <summary>Ramène la liste à maxEntries en UN seul décalage mémoire.
+        /// À appeler sous <c>_lock</c>. Remplace les RemoveAt(0) répétés (un memmove par entrée).</summary>
+        private void TrimEntries()
+        {
+            int excess = _entries.Count - maxEntries;
+            if (excess > 0) _entries.RemoveRange(0, excess);
         }
 
         // ─── Async file reader ────────────────────────────────────────────────────
@@ -291,12 +302,10 @@ namespace VaroniaBackOffice
 
                         lock (_lock)
                         {
+                            // Trim APRÈS la boucle : évite un décalage mémoire par entrée ajoutée.
                             foreach (var e in newEntries)
-                            {
                                 _entries.Add(e);
-                                if (_entries.Count > maxEntries)
-                                    _entries.RemoveAt(0);
-                            }
+                            TrimEntries();
                             _dirty = true;
                         }
                     }

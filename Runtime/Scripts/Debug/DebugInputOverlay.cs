@@ -450,9 +450,13 @@ namespace VaroniaBackOffice
         {
             if (_panel == null) return;
 
-            // Taille FIXE (pas de scaling résolution). On empile les panneaux d'index d'arme inférieur
-            // au-dessus de celui-ci, collés à la suite (hauteur réelle + petit StackMargin), le tout
-            // ancré sur la marge fixe du coin bas-droit.
+            // Scaling aligné sur l'IMGUI (référence 1080p) : appliqué globalement au panneau via
+            // PanelSettings.scale → contenu, polices, marges et empilement suivent, comme en IMGUI.
+            ApplyPanelScale_UITK();
+
+            // On empile les panneaux d'index d'arme inférieur au-dessus de celui-ci, collés à la suite
+            // (hauteur réelle + StackMargin). Tout est exprimé en unités non scalées : le scale du panneau
+            // s'applique ensuite uniformément.
             int myIdx = s_overlays.IndexOf(this);
             float bottom = StartY;
             for (int i = 0; i < s_overlays.Count; i++)
@@ -469,10 +473,22 @@ namespace VaroniaBackOffice
             }
 
             _panel.style.width  = PanelWidth;
-            _panel.style.right  = ScreenMargin;   // marge fixe droite
-            _panel.style.bottom = bottom;         // marge fixe bas + empilement
+            _panel.style.right  = ScreenMargin;   // marge droite
+            _panel.style.bottom = bottom;         // marge bas + empilement
             _panel.style.left   = StyleKeyword.Auto;
             _panel.style.top    = StyleKeyword.Auto;
+        }
+
+        // Même formule que l'IMGUI : (Screen.height / 1080) * scaleFactor, appliquée au panneau entier.
+        // PanelSettings.scale n'est honoré qu'en ConstantPixelSize (le mode utilisé ici).
+        private float _lastPanelScale = -1f;
+        private void ApplyPanelScale_UITK()
+        {
+            if (_panelSettings == null) return;
+            float scale = (Screen.height / 1080f) * scaleFactor;
+            if (Mathf.Approximately(scale, _lastPanelScale)) return;
+            _lastPanelScale = scale;
+            _panelSettings.scale = scale;
         }
 
         /// <summary>Hauteur réelle du panneau (layout live). 0 si pas encore construit/mesuré.</summary>
@@ -548,6 +564,8 @@ namespace VaroniaBackOffice
                 GUI.Label(new Rect(lx, telY, W - 14f * scale, 16f * scale), "last input :", _lastInputLabelStyle);
                 string lastVal = _lastInputTime < 0f
                     ? "—" : (Time.unscaledTime - _lastInputTime).ToString("F1") + " s";
+                // Style partagé avec DrawTelemetryRow (qui en change la couleur) → on la fixe ici.
+                _lastInputValueStyle.normal.textColor = ColValue;
                 GUI.Label(new Rect(lx, telY + 16f * scale, W - 14f * scale, 16f * scale), lastVal, _lastInputValueStyle);
                 telY += 16f * scale + 18f * scale;
 
@@ -581,8 +599,10 @@ namespace VaroniaBackOffice
         private void DrawTelemetryRow(float x, float y, float W, string label, string value, Color valueColor, float scale)
         {
             GUI.Label(new Rect(x, y, 60f * scale, 15f * scale), label, _lastInputLabelStyle);
-            GUIStyle valStyle = new GUIStyle(_lastInputValueStyle) { normal = { textColor = valueColor } };
-            GUI.Label(new Rect(x + 60f * scale, y, W - 74f * scale, 15f * scale), value, valStyle);
+            // Style réutilisé : un new GUIStyle par ligne et par frame allouait inutilement (GC).
+            // Seule la couleur change → on la réassigne sur le style partagé avant le Label.
+            _lastInputValueStyle.normal.textColor = valueColor;
+            GUI.Label(new Rect(x + 60f * scale, y, W - 74f * scale, 15f * scale), value, _lastInputValueStyle);
         }
 
         // Hauteur dynamique : somme des lignes réellement affichées (mêmes conditions que OnGUI).

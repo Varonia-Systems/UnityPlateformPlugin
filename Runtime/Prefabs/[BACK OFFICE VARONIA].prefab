@@ -438,7 +438,7 @@ MonoBehaviour:
   thankYouDisplayTime: 3
   currentRating: 0
   hoveredRating: 0
-  isVisible: 1
+  isVisible: 0
   isShowingThankYou: 0
   debugStart: 0
   selectionHoldTime: 0.3

@@ -745,7 +745,7 @@ namespace VaroniaBackOffice
             if (fields.Count == 0)
             {
                 EditorGUILayout.HelpBox(
-                    "Aucun champ int/enum trouvé dans GameConfig (GAME_CONFIG désactivé ou pas de champ adapté). " +
+                    "Aucun champ int/bool/enum trouvé dans GameConfig (GAME_CONFIG désactivé ou pas de champ adapté). " +
                     "Le premier tableau sera toujours affiché.", MessageType.Info);
             }
             else
@@ -755,7 +755,7 @@ namespace VaroniaBackOffice
                 int cur = string.IsNullOrEmpty(selProp.stringValue) ? 0 : fields.IndexOf(selProp.stringValue) + 1;
                 if (cur < 0) cur = 0;
                 int next = EditorGUILayout.Popup(new GUIContent("Selector Field (GameConfig)",
-                    "Champ int/enum du GameConfig dont la valeur sélectionne le tableau affiché."),
+                    "Champ int/bool/enum du GameConfig dont la valeur sélectionne le tableau affiché (bool : False=0, True=1)."),
                     cur, options.ToArray());
                 selProp.stringValue = next == 0 ? "" : fields[next - 1];
                 if (next > 0) fieldTypes.TryGetValue(fields[next - 1], out selType);
@@ -789,8 +789,16 @@ namespace VaroniaBackOffice
                     break;
                 }
 
-                // Valeur de match : popup enum si le champ est un enum, sinon int.
-                if (selType != null && selType.IsEnum)
+                // Valeur de match : popup enum si le champ est un enum, False/True si bool, sinon int.
+                if (selType == typeof(bool))
+                {
+                    int bidx = matchP.intValue != 0 ? 1 : 0;
+                    int nbidx = EditorGUILayout.Popup(new GUIContent("Match Value",
+                        "Valeur du sélecteur qui active ce tableau (bool : False=0, True=1)."),
+                        bidx, new[] { "False", "True" });
+                    matchP.intValue = nbidx;
+                }
+                else if (selType != null && selType.IsEnum)
                 {
                     var names  = Enum.GetNames(selType);
                     var values = Enum.GetValues(selType);
@@ -820,24 +828,35 @@ namespace VaroniaBackOffice
 
                     EditorGUILayout.BeginHorizontal();
 
-                    // Dropdown des scènes du build (avec marqueur si la valeur n'y est plus).
-                    int sceneIdx = Array.IndexOf(scenes, nameP.stringValue);
-                    if (sceneIdx < 0 && !string.IsNullOrEmpty(nameP.stringValue))
+                    // Nom : champ libre (scène du build OU commande custom type "SKIP_...",
+                    // envoyée telle quelle à la cible SendMessage) + picker des scènes du build.
+                    EditorGUILayout.BeginVertical();
+                    EditorGUILayout.BeginHorizontal();
+                    nameP.stringValue = EditorGUILayout.TextField(nameP.stringValue);
+                    if (GUILayout.Button("▾", GUILayout.Width(22)))
                     {
-                        var opts = new List<string> { nameP.stringValue + "  (hors build)" };
-                        opts.AddRange(scenes);
-                        int ni = EditorGUILayout.Popup(0, opts.ToArray());
-                        if (ni > 0) nameP.stringValue = scenes[ni - 1];
+                        var menu      = new GenericMenu();
+                        var soCapture = nameP.serializedObject;
+                        var pathCap   = nameP.propertyPath;
+                        foreach (var sc in scenes)
+                        {
+                            string captured = sc;
+                            menu.AddItem(new GUIContent(captured), captured == nameP.stringValue, () =>
+                            {
+                                var p = soCapture.FindProperty(pathCap);
+                                if (p != null) { p.stringValue = captured; soCapture.ApplyModifiedProperties(); }
+                            });
+                        }
+                        if (scenes.Length == 0)
+                            menu.AddDisabledItem(new GUIContent("(aucune scène dans le build)"));
+                        menu.ShowAsContext();
                     }
-                    else if (scenes.Length > 0)
-                    {
-                        int ni = EditorGUILayout.Popup(Mathf.Max(0, sceneIdx), scenes);
-                        nameP.stringValue = scenes[Mathf.Clamp(ni, 0, scenes.Length - 1)];
-                    }
-                    else
-                    {
-                        EditorGUILayout.LabelField("(aucune scène dans le build)");
-                    }
+                    EditorGUILayout.EndHorizontal();
+
+                    if (!string.IsNullOrEmpty(nameP.stringValue) && Array.IndexOf(scenes, nameP.stringValue) < 0)
+                        EditorGUILayout.LabelField("hors build — envoyé tel quel à la cible SendMessage",
+                            EditorStyles.miniLabel);
+                    EditorGUILayout.EndVertical();
 
                     imgP.objectReferenceValue = EditorGUILayout.ObjectField(
                         imgP.objectReferenceValue, typeof(Texture2D), false,
@@ -875,11 +894,11 @@ namespace VaroniaBackOffice
             if (gc == null) return names;
 
             foreach (var f in gc.GetFields(BindingFlags.Public | BindingFlags.Instance))
-                if (f.FieldType == typeof(int) || f.FieldType.IsEnum)
+                if (f.FieldType == typeof(int) || f.FieldType == typeof(bool) || f.FieldType.IsEnum)
                 { names.Add(f.Name); typesOut[f.Name] = f.FieldType; }
 
             foreach (var p in gc.GetProperties(BindingFlags.Public | BindingFlags.Instance))
-                if (p.CanRead && (p.PropertyType == typeof(int) || p.PropertyType.IsEnum) && !typesOut.ContainsKey(p.Name))
+                if (p.CanRead && (p.PropertyType == typeof(int) || p.PropertyType == typeof(bool) || p.PropertyType.IsEnum) && !typesOut.ContainsKey(p.Name))
                 { names.Add(p.Name); typesOut[p.Name] = p.PropertyType; }
 
             return names;

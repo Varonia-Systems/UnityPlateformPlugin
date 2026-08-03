@@ -84,17 +84,37 @@ namespace VaroniaBackOffice
 
         // ── Texture helpers ──────────────────────────────────────────────────────
 
+        // Appelés DEPUIS le rendu (OnGUI, y compris dans les boucles devices) : sans cache, chaque
+        // repaint allouait de nouvelles Texture2D en HideAndDontSave, jamais libérées. On mémoïse.
+
+        struct TexKey : System.IEquatable<TexKey>
+        {
+            public int W, H, R; public Color C;
+            public bool Equals(TexKey o) => W == o.W && H == o.H && R == o.R && C == o.C;
+            public override bool Equals(object o) => o is TexKey k && Equals(k);
+            public override int GetHashCode() => ((W * 397 ^ H) * 397 ^ R) * 397 ^ C.GetHashCode();
+        }
+
+        static readonly Dictionary<TexKey, Texture2D> _texCache = new Dictionary<TexKey, Texture2D>();
+
         static Texture2D MakeTex(Color col)
         {
+            var key = new TexKey { W = 1, H = 1, R = -1, C = col };
+            if (_texCache.TryGetValue(key, out var cached) && cached != null) return cached;
+
             var t = new Texture2D(1, 1, TextureFormat.RGBA32, false);
             t.SetPixel(0, 0, col);
             t.Apply();
             t.hideFlags = HideFlags.HideAndDontSave;
+            _texCache[key] = t;
             return t;
         }
 
         static Texture2D MakeRoundedTex(int w, int h, Color col, int radius)
         {
+            var key = new TexKey { W = w, H = h, R = radius, C = col };
+            if (_texCache.TryGetValue(key, out var cached) && cached != null) return cached;
+
             var t = new Texture2D(w, h, TextureFormat.RGBA32, false);
             Color clear = new Color(0, 0, 0, 0);
             for (int y = 0; y < h; y++)
@@ -113,6 +133,7 @@ namespace VaroniaBackOffice
                 }
             t.Apply();
             t.hideFlags = HideFlags.HideAndDontSave;
+            _texCache[key] = t;
             return t;
         }
 

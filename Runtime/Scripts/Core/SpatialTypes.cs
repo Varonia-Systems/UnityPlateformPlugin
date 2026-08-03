@@ -59,5 +59,9 @@ namespace VaroniaBackOffice
         public Vector4_        SyncQuaterion;
         public List<Boundary_> Boundaries;
         public double          Multiplier;
+
+        // Si true, le son de boundary bipe AUSSI à l'approche du bord (montée progressive).
+        // Si false (défaut) : le son ne se déclenche que lorsqu'on est hors de la boundary.
+        public bool            BeepOnApproach;
     }
 }

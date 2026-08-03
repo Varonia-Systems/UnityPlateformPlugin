@@ -1350,7 +1350,7 @@ namespace VaroniaBackOffice
 
         private void DrawSpatialFieldsCompact()
         {
-            if (_configObj == null || _knownFields == null) return;
+            if (_configObj == null) return;
             var s = _configObj as Spatial;
             if (s == null) return;
 
@@ -1359,27 +1359,12 @@ namespace VaroniaBackOffice
             DrawFriendlySyncQuatY(s);
             DrawFriendlyMultiplier(s);
 
+            // Son de boundary aussi à l'approche (sinon : uniquement hors zone). Global au spatial.
+            EditorGUI.BeginChangeCheck();
+            DrawInspBool("Beep On Approach", ref s.BeepOnApproach);
+            if (EditorGUI.EndChangeCheck()) _isDirty = true;
+
             EditorGUILayout.Space(12);
-
-            // ── Raw data ──
-            var hdr = new GUIStyle(EditorStyles.miniLabel)
-            {
-                fontStyle = FontStyle.Bold,
-                normal    = { textColor = colTextMuted },
-                padding   = new RectOffset(0, 0, 2, 2),
-            };
-            EditorGUILayout.BeginHorizontal();
-            GUILayout.Space(8);
-            GUILayout.Label("RAW DATA", hdr);
-            GUILayout.Space(8);
-            EditorGUILayout.EndHorizontal();
-            EditorGUILayout.Space(2);
-
-            foreach (var field in _knownFields)
-            {
-                if (field.Name == "Boundaries") continue;
-                DrawRawSpatialField(field);
-            }
         }
 
         private void DrawFriendlySyncPos(Spatial s)
@@ -1474,58 +1459,6 @@ namespace VaroniaBackOffice
             if (EditorGUI.EndChangeCheck())
             {
                 s.Multiplier = pct / 100.0;
-                _isDirty = true;
-            }
-        }
-
-        private void DrawRawSpatialField(System.Reflection.FieldInfo field)
-        {
-            var value = field.GetValue(_configObj);
-            var type  = field.FieldType;
-            EditorGUI.BeginChangeCheck();
-            object newValue = value;
-
-            EditorGUILayout.BeginHorizontal();
-            GUILayout.Space(8);
-            GUILayout.Label(field.Name, fieldLabelStyle, GUILayout.Width(70));
-
-            if (type.Name == "Vector3_")
-            {
-                if (value == null) { value = Activator.CreateInstance(type); newValue = value; }
-                var v = new Vector3(GetField(value, "x"), GetField(value, "y"), GetField(value, "z"));
-                Vector3 nv = EditorGUILayout.Vector3Field(GUIContent.none, v);
-                if (nv != v) { SetField(value, "x", nv.x); SetField(value, "y", nv.y); SetField(value, "z", nv.z); }
-            }
-            else if (type.Name == "Vector4_")
-            {
-                if (value == null) { value = Activator.CreateInstance(type); newValue = value; }
-                var v = new Vector4(GetField(value, "x"), GetField(value, "y"), GetField(value, "z"), GetField(value, "w"));
-                EditorGUILayout.BeginVertical();
-                EditorGUILayout.BeginHorizontal();
-                v.x = EditorGUILayout.FloatField(v.x);
-                v.y = EditorGUILayout.FloatField(v.y);
-                EditorGUILayout.EndHorizontal();
-                EditorGUILayout.BeginHorizontal();
-                v.z = EditorGUILayout.FloatField(v.z);
-                v.w = EditorGUILayout.FloatField(v.w);
-                EditorGUILayout.EndHorizontal();
-                EditorGUILayout.EndVertical();
-                SetField(value, "x", v.x); SetField(value, "y", v.y);
-                SetField(value, "z", v.z); SetField(value, "w", v.w);
-            }
-            else if (type == typeof(float))   newValue = EditorGUILayout.FloatField((float)value);
-            else if (type == typeof(double))  newValue = EditorGUILayout.DoubleField((double)value);
-            else if (type == typeof(int))     newValue = EditorGUILayout.IntField((int)value);
-            else if (type == typeof(bool))    newValue = EditorGUILayout.Toggle((bool)value);
-            else if (type == typeof(string))  newValue = EditorGUILayout.TextField((string)value ?? "");
-            else { GUILayout.Label("(complex)", readOnlyStyle); }
-
-            GUILayout.Space(8);
-            EditorGUILayout.EndHorizontal();
-
-            if (EditorGUI.EndChangeCheck())
-            {
-                field.SetValue(_configObj, newValue);
                 _isDirty = true;
             }
         }

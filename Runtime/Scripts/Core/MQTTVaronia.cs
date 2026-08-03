@@ -25,6 +25,13 @@ namespace VaroniaBackOffice
                 HandleConfigLoaded();
             }
         }
+
+        // OnConfigLoaded est un event STATIQUE : sans désabonnement, un MQTTVaronia détruit
+        // (doublon, rechargement) resterait référencé et lèverait une MissingReferenceException.
+        private void OnDestroy()
+        {
+            BackOfficeVaronia.OnConfigLoaded -= HandleConfigLoaded;
+        }
         
         
         private void HandleConfigLoaded()
@@ -44,11 +51,18 @@ namespace VaroniaBackOffice
             base.OnConnected();
             Debug.Log("#<color=Green>[Back Office Varonia] Successfully connected to the broker</color>");
             SoftState = ESoftState.GAME_LAUNCHED;
-            StartCoroutine(UpConnection());
+
+            // OnConnected est rappelé à CHAQUE reconnexion : sans arrêt de la précédente, les
+            // coroutines de ping s'accumulaient (N reconnexions = N pings/seconde).
+            if (_upConnectionRoutine != null) StopCoroutine(_upConnectionRoutine);
+            _upConnectionRoutine = StartCoroutine(UpConnection());
             
             
             Subscribe();
-            
+
+            // rejoue les messages émis avant l'établissement de la connexion
+            while (_pendingMsgs.Count > 0)
+                PublishMsg(_pendingMsgs.Dequeue());
         }
 
         
@@ -58,15 +72,33 @@ namespace VaroniaBackOffice
             client.Subscribe(new string[] { "ServerToUnity/" + BackOfficeVaronia.Instance.config.MQTT_IDClient }, new byte[] { MqttMsgBase.QOS_LEVEL_EXACTLY_ONCE });
         }
         
+        // Messages émis avant que la connexion (asynchrone) soit établie : mis en attente
+        // puis flushés dans OnConnected. Évite l'erreur au boot (SetSoftState dès le Start)
+        // et ne perd pas les premiers états.
+        readonly Queue<string> _pendingMsgs = new Queue<string>();
+        const int MaxPendingMsgs = 30;
+
         public void PublishMsg(string Msg)
         {
+            // Poste sans back office (pas de broker configuré) : on ignore silencieusement.
+            var cfg = BackOfficeVaronia.Instance != null ? BackOfficeVaronia.Instance.config : null;
+            if (cfg == null || string.IsNullOrEmpty(cfg.MQTT_ServerIP))
+                return;
+
+            // Connexion pas encore établie : en attente (la connexion MQTT est asynchrone).
+            if (client == null || !client.IsConnected)
+            {
+                if (_pendingMsgs.Count < MaxPendingMsgs) _pendingMsgs.Enqueue(Msg);
+                return;
+            }
+
             try
             {
-                client.Publish("UnityToServer/" + BackOfficeVaronia.Instance.config.MQTT_IDClient, System.Text.Encoding.UTF8.GetBytes(Msg), MqttMsgBase.QOS_LEVEL_EXACTLY_ONCE, false);
+                client.Publish("UnityToServer/" + cfg.MQTT_IDClient, System.Text.Encoding.UTF8.GetBytes(Msg), MqttMsgBase.QOS_LEVEL_EXACTLY_ONCE, false);
             }
-            catch (Exception)
+            catch (Exception e)
             {
-                Debug.LogError("[Back Office Varonia] Error while publishing message");
+                Debug.LogWarning("[Back Office Varonia] Error while publishing message: " + e.Message);
             }
         }
         
@@ -75,36 +107,29 @@ namespace VaroniaBackOffice
 
         protected override void DecodeMessage(string topic, byte[] message) // Receive Message
         {
-            
-            
-            var payload = JsonConvert.DeserializeObject<MQTT_Payload>(System.Text.Encoding.UTF8.GetString(message));
-
-            
-            try 
+            // IMPORTANT : la désérialisation DOIT rester dans le try. Un JSON malformé qui remonte
+            // ici ferait échouer ProcessMqttMessageBackgroundQueue, la file ne serait jamais vidée
+            // et le message fautif serait rejoué indéfiniment (réception MQTT bloquée).
+            try
             {
-                // Native Unity deserialization (No plugin required)
-                
-                if (payload != null) 
-                {
-                    Debug.Log("[MQTT] Payload successfully parsed.");
-                }
+                var payload = JsonConvert.DeserializeObject<MQTT_Payload>(System.Text.Encoding.UTF8.GetString(message));
 
+                if (payload == null)
+                {
+                    Debug.LogWarning("[MQTT] Payload vide ou non désérialisable — message ignoré.");
+                    return;
+                }
 
                 if (payload.sMethod == "GET_SOFTPARTYSTART_RESULT")
                     BackOfficeVaronia.Instance.TriggerStartGame(false);
-                
-         
+
                 if (payload.sMethod == "GET_SOFTPARTYSKIPTUTOANDSTART_RESULT")
                     BackOfficeVaronia.Instance.TriggerStartGame(true);
-            
-         
-            
             }
-            catch (System.Exception e) 
+            catch (System.Exception e)
             {
-                Debug.LogError($"[MQTT] Failed to deserialize payload: {e.Message}");
+                Debug.LogError($"[MQTT] Failed to handle payload: {e.Message}");
             }
-            
         }
         
         
@@ -132,7 +157,9 @@ namespace VaroniaBackOffice
         
         
         
-        // Ping Serveur
+        // Ping Serveur — une seule instance active à la fois (voir OnConnected).
+        private Coroutine _upConnectionRoutine;
+
         IEnumerator UpConnection()
         {
             while (true)
@@ -189,6 +216,46 @@ namespace VaroniaBackOffice
 
         }
 
+        /// <summary>
+        /// Envoie la note (1..5 étoiles) donnée par le joueur au back-office. Même logique que les autres
+        /// SET_ : payload MQTT_Payload publié sur UnityToServer/&lt;IDClient&gt;, uniquement si un serveur
+        /// MQTT est configuré. Le back-office reçoit sMethod="SET_SOFTRATING" avec Rating + GameValue.
+        /// En plus, on trace l'événement via SETDB_ADDEVENT (canal déjà supporté) pour ne rien perdre.
+        /// </summary>
+        public void SetRating(int rating)
+        {
+            if (String.IsNullOrEmpty(BackOfficeVaronia.Instance.config.MQTT_ServerIP))
+                return;
+
+            var D = new Dictionary<string, object>
+            {
+                { "Rating",    rating },
+                { "GameValue", ReadGameId() },
+            };
+            PublishMsg(JsonConvert.SerializeObject(new MQTT_Payload
+            {
+                sMethod        = "SET_SOFTRATING",
+                CallerDeviceID = BackOfficeVaronia.Instance.config.MQTT_IDClient,
+                Items          = D
+            }));
+
+            // Trace aussi comme événement DB (déjà géré côté serveur) : "<Produit>_Rating_<n>".
+            SETDB_ADDEVENT("Rating_" + rating);
+        }
+
+        /// <summary>GameID lu depuis StreamingAssets/GameID.txt (9999 par défaut si absent/illisible).
+        /// Source unique pour SetRating et SetScore.</summary>
+        private static int ReadGameId()
+        {
+            try
+            {
+                using (var sr = new StreamReader(Application.streamingAssetsPath + "/GameID.txt"))
+                    return int.Parse(sr.ReadToEnd());
+            }
+            // Fichier absent = cas NORMAL (jeu non référencé côté back-office) → défaut silencieux.
+            catch { return 9999; }
+        }
+
         
         
 #if GAME_SCORE
@@ -197,21 +264,8 @@ namespace VaroniaBackOffice
 
             if (!String.IsNullOrEmpty(BackOfficeVaronia.Instance.config.MQTT_ServerIP))
             {
-                // Get Game ID
+                int GameId = ReadGameId();
 
-                int GameId = 9999;
-
-                try
-                {
-                    using (StreamReader sr = new StreamReader(Application.streamingAssetsPath + "/GameID.txt"))
-                    {
-                        GameId = int.Parse(sr.ReadToEnd());
-                    }
-                }
-                catch (Exception)
-                {
-
-                }
                 var D = new Dictionary<string, object>();
                 D.Add("Data", Score);
                 D.Add("GameValue", GameId);

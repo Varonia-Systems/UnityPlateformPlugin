@@ -231,14 +231,30 @@ namespace M2MqttUnity
 
         private void ProcessMqttMessageBackgroundQueue()
         {
-            foreach (MqttMsgPublishEventArgs msg in backMessageQueue)
+            // [Varonia] Chaque message est traité isolément : une exception sur un message
+            // (ex. JSON malformé) ne doit ni interrompre les suivants, ni empêcher le Clear()
+            // final — sinon le message fautif resterait en file et serait rejoué à chaque frame.
+            try
             {
-                if (msg.Topic.StartsWith("ServerToUnity"))
-                    DecodeMessage(msg.Topic, msg.Message);
-                else
-                    ReceiveMsg.Invoke(msg.Topic, msg.Message);
+                foreach (MqttMsgPublishEventArgs msg in backMessageQueue)
+                {
+                    try
+                    {
+                        if (msg.Topic.StartsWith("ServerToUnity"))
+                            DecodeMessage(msg.Topic, msg.Message);
+                        else
+                            ReceiveMsg.Invoke(msg.Topic, msg.Message);
+                    }
+                    catch (System.Exception e)
+                    {
+                        Debug.LogError($"[MQTT] Message ignoré (topic '{msg.Topic}') : {e.Message}");
+                    }
+                }
             }
-            backMessageQueue.Clear();
+            finally
+            {
+                backMessageQueue.Clear();
+            }
         }
 
         /// <summary>

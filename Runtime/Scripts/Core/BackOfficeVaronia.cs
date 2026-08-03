@@ -184,7 +184,12 @@ namespace VaroniaBackOffice
         private void Awake()
         {
             mqttClient = GetComponent<MQTTVaronia>();
-            InitializeSingleton();
+
+            // Destroy() étant différé en fin de frame, il FAUT sortir explicitement sur un doublon :
+            // sinon l'instance condamnée exécutait quand même LoadConfig() (réécriture de
+            // GlobalConfig.json + OnConfigLoaded levé une seconde fois).
+            if (!InitializeSingleton()) return;
+
             LoadConfig();
             CheckMainCamera();
             _lastUpdateTime = Time.realtimeSinceStartup;
@@ -301,15 +306,18 @@ namespace VaroniaBackOffice
             }
         }
 
-        private void InitializeSingleton()
+        /// <summary>Retourne false si cette instance est un doublon (elle est alors détruite) :
+        /// l'appelant doit interrompre son initialisation.</summary>
+        private bool InitializeSingleton()
         {
             if (Instance != null && Instance != this)
             {
                 Destroy(gameObject);
-                return;
+                return false;
             }
             Instance = this;
             DontDestroyOnLoad(gameObject);
+            return true;
         }
 
         private void OnGUI()
@@ -596,7 +604,12 @@ namespace VaroniaBackOffice
 
             Controller legacyController = Controller.Unknown;
             try { if (ctrlObj != null) legacyController = (Controller)Convert.ToInt32(ctrlObj); }
-            catch { }
+            catch (Exception e)
+            {
+                // Migration silencieuse = config legacy non convertie sans que personne ne le sache.
+                Debug.LogWarning($"[BackOfficeVaronia] Champ legacy 'Controller' illisible ('{ctrlObj}') : " +
+                                 $"{e.Message}. Migration effectuée avec Controller.Unknown.");
+            }
 
             string legacyMac = macObj != null ? macObj.ToString() : "";
 
@@ -683,6 +696,46 @@ namespace VaroniaBackOffice
             catch (Exception e)
             {
                 Debug.LogError($"[BackOfficeVaronia] Failed to save config: {e.Message}");
+            }
+        }
+
+        /// <summary>Une entrée de notation persistée dans Rating.json (date + note).</summary>
+        [Serializable]
+        public class RatingEntry
+        {
+            public string Date;   // ISO 8601 (DateTime.Now "o")
+            public int    Rating; // 1..5
+        }
+
+        /// <summary>
+        /// Ajoute une note joueur (date + rating) dans Rating.json, dans le dossier DU JEU
+        /// (Application.persistentDataPath, à côté de Config.json).
+        /// Le fichier est une LISTE : chaque appel AJOUTE une entrée (append), sans écraser l'historique.
+        /// </summary>
+        public void AppendRating(int rating)
+        {
+            try
+            {
+                string root = Application.persistentDataPath;
+                if (!Directory.Exists(root)) Directory.CreateDirectory(root);
+                string path = Path.Combine(root, "Rating.json");
+
+                List<RatingEntry> list = null;
+                if (File.Exists(path))
+                {
+                    try { list = JsonConvert.DeserializeObject<List<RatingEntry>>(File.ReadAllText(path)); }
+                    catch (Exception e) { Debug.LogWarning($"[Rating] Rating.json illisible, réinitialisé : {e.Message}"); }
+                }
+                if (list == null) list = new List<RatingEntry>();
+
+                list.Add(new RatingEntry { Date = DateTime.Now.ToString("o"), Rating = rating });
+                File.WriteAllText(path, JsonConvert.SerializeObject(list, Formatting.Indented));
+
+                Debug.Log($"[Rating] Note {rating} ajoutée à {path} ({list.Count} entrée(s)).");
+            }
+            catch (Exception e)
+            {
+                Debug.LogError($"[Rating] Écriture Rating.json impossible : {e.Message}");
             }
         }
 

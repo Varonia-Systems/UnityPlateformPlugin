@@ -272,6 +272,38 @@ namespace VaroniaBackOffice
         private static int[]    _bootTime    = new int[1];
         private static string[] _model       = new string[1];
 
+        // ── Reset des statiques ───────────────────────────────────────────────
+        // Sans ça, avec "Enter Play Mode Options / Reload Domain" désactivé, l'état des boutons,
+        // la télémétrie et surtout les EVENTS statiques survivent d'une session Play à l'autre :
+        // les abonnés de la session précédente (MonoBehaviours détruits) restent branchés et
+        // lèvent des MissingReferenceException. Même pattern que ItemTracking/SteamVRBridge.
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        private static void ResetStatics()
+        {
+            Instance    = null;
+            WeaponCount = 1;
+
+            _states     = new bool[1][] { new bool[4] };
+            _downFrame  = new int[1][]  { new int[4] { -1, -1, -1, -1 } };
+            _upFrame    = new int[1][]  { new int[4] { -1, -1, -1, -1 } };
+
+            _isConnected = new bool[1];
+            _battery     = new int[1];
+            _rssi        = new float[1];
+            _bootTime    = new int[1];
+            _model       = new string[1];
+
+            OnButtonChanged        = null;
+            OnPrimaryDownStatic    = null;
+            OnPrimaryUpStatic      = null;
+            OnSecondaryDownStatic  = null;
+            OnSecondaryUpStatic    = null;
+            OnTertiaryDownStatic   = null;
+            OnTertiaryUpStatic     = null;
+            OnQuaternaryDownStatic = null;
+            OnQuaternaryUpStatic   = null;
+        }
+
         // ── Rétrocompatibilité (arme par défaut) ─────────────────────────────
         // Les overloads sans index ciblent l'arme IsDefault (slot résolu par le registry),
         // et non plus le slot 0 en dur.

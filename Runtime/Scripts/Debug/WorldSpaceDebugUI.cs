@@ -593,6 +593,8 @@ namespace VaroniaBackOffice
                         if (pi != null) mqttOk = (bool)pi.GetValue(null);
                     }
                 }
+                // Sonde par réflexion, appelée en continu : l'absence du type/propriété est un cas
+                // NORMAL (projet sans ce module) → silence volontaire, logger spammerait chaque frame.
                 catch { }
 
                 _game.text  = game;
