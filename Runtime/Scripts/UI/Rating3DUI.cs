@@ -44,15 +44,31 @@ namespace VBO_Ultimate.Runtime.Scripts.UI
         public float textPulseSpeed = 2f;
         public float textPulseAmount = 0.05f;
 
+        // Code langue lu depuis GlobalConfig.Language, insensible à la casse ("Fr", "fr", "FR").
+        // Une langue inconnue retombe sur l'anglais.
         [Header("Localization")]
         public string textFR = "Notez votre expérience";
         public string textEN = "Rate your experience";
         public string textES = "Califica tu experiencia";
-        
+        public string textDE = "Bewerten Sie Ihr Erlebnis";
+        public string textIT = "Valuta la tua esperienza";
+        public string textPT = "Avalie a sua experiência";
+        public string textRU = "Оцените свои впечатления";
+        public string textZH = "为您的体验评分";
+        public string textJA = "体験を評価してください";
+        public string textAR = "قيّم تجربتك";
+
         [Header("Thank You Message")]
         public string thankYouFR = "Merci de votre retour !";
         public string thankYouEN = "Thank you for your feedback!";
         public string thankYouES = "¡Gracias por sus comentarios!";
+        public string thankYouDE = "Danke für Ihr Feedback!";
+        public string thankYouIT = "Grazie per il tuo riscontro!";
+        public string thankYouPT = "Obrigado pelo seu comentário!";
+        public string thankYouRU = "Спасибо за ваш отзыв!";
+        public string thankYouZH = "感谢您的反馈！";
+        public string thankYouJA = "ご意見ありがとうございました！";
+        public string thankYouAR = "شكرًا على ملاحظاتك!";
         public float thankYouDisplayTime = 3f;
 
         [Header("State")]
@@ -129,6 +145,7 @@ namespace VBO_Ultimate.Runtime.Scripts.UI
         private List<RectTransform> _starRects = new List<RectTransform>();
         private LineRenderer _lineRenderer;
         private Vector3 _smoothHitPoint;
+        private bool _laserNeedsSnap = true;
         private float _currentLaserAlpha = 0f;
         private Material _alwaysOnTopMat;
 
@@ -346,7 +363,7 @@ namespace VBO_Ultimate.Runtime.Scripts.UI
             _lineRenderer.endWidth = 0f; // Pointe du laser (0 pour être pointu)
             
             // Utiliser un shader qui supporte le vertex color/alpha
-            _lineRenderer.material = new Material(Shader.Find("Sprites/Default"));
+            _lineRenderer.material = CreateLaserMaterial();
             
             // Initialiser le dégradé avec alpha 0
             UpdateLaserGradient(0f);
@@ -421,6 +438,29 @@ namespace VBO_Ultimate.Runtime.Scripts.UI
             chObj.SetActive(false);
         }
 
+        /// <summary>
+        /// Matériau du rayon. Quand <see cref="alwaysOnTop"/> est actif le panneau traverse le
+        /// décor : si le laser, lui, reste testé en profondeur, il est masqué par la moindre
+        /// géométrie entre l'arme et le panneau et on croit qu'il ne s'affiche pas.
+        /// </summary>
+        private Material CreateLaserMaterial()
+        {
+            if (alwaysOnTop)
+            {
+                Shader onTop = Shader.Find("UI/AlwaysOnTop");
+                if (onTop != null)
+                {
+                    var mat = new Material(onTop) { hideFlags = HideFlags.HideAndDontSave };
+                    // Ce shader clippe sur _ClipRect ; non renseigné il vaut (0,0,0,0) et
+                    // effacerait tout le rayon.
+                    mat.SetVector("_ClipRect", new Vector4(-1e10f, -1e10f, 1e10f, 1e10f));
+                    return mat;
+                }
+            }
+
+            return new Material(Shader.Find("Sprites/Default")) { hideFlags = HideFlags.HideAndDontSave };
+        }
+
         private void UpdateLaserGradient(float alpha)
         {
             if (_lineRenderer == null) return;
@@ -482,21 +522,20 @@ namespace VBO_Ultimate.Runtime.Scripts.UI
             }
 
             // Pas d'arme (jeu hand tracking ?) -> interaction au regard.
-            bool hasWeapon = VaroniaWeapon.Instance != null
-                          && VaroniaWeapon.Instance.currentweapons.Count > 0
-                          && VaroniaWeapon.Instance.currentweapons[0] != null
-                          && VaroniaWeapon.Instance.currentweapons[0].beginRaycast != null;
+            _Weapon weapon0 = ResolveWeapon();
 
-            if (!hasWeapon)
+            if (weapon0 == null)
             {
                 if (_lineRenderer != null) _lineRenderer.enabled = false;
+                if (!_gazeMode)
+                    Debug.Log("[Rating3DUI] Aucune arme trackée exploitable → mode regard (pas de laser).");
                 _gazeMode = true;
+                _laserNeedsSnap = true;
+                _currentLaserAlpha = 0f;
                 if (useGazeWhenNoWeapon) HandleGazeInteraction();
                 return;
             }
             _gazeMode = false;
-
-            _Weapon weapon0 = VaroniaWeapon.Instance.currentweapons[0];
 
             Ray ray = new Ray(weapon0.beginRaycast.position, weapon0.beginRaycast.forward);
             
@@ -506,49 +545,49 @@ namespace VBO_Ultimate.Runtime.Scripts.UI
             float closestDist = float.MaxValue;
             Vector3 hitPoint = weapon0.beginRaycast.position + weapon0.beginRaycast.forward * followDistance;
 
-            for (int i = 0; i < _starRects.Count; i++)
-            {
-                // Vérification simple de collision avec le plan du canvas
-                Plane p = new Plane(_canvasRoot.transform.forward, _canvasRoot.transform.position);
-                if (p.Raycast(ray, out float enter))
-                {
-                    Vector3 worldPoint = ray.GetPoint(enter);
-                    Vector3 localPoint = _starRects[i].InverseTransformPoint(worldPoint);
-                    
-                    Rect r = _starRects[i].rect;
-                    
-                    // 1. Vérification pour la SELECTION (hitbox serrée)
-                    Vector2 selectionSize = r.size * hitboxTolerance;
-                    Rect selectionHitbox = new Rect(r.center - selectionSize * 0.5f, selectionSize);
-                    
-                    if (selectionHitbox.Contains(localPoint))
-                    {
-                        if (enter < closestDist)
-                        {
-                            closestDist = enter;
-                            hoveredRating = i + 1;
-                            hitPoint = worldPoint;
-                        }
-                    }
+            // Point d'impact par défaut : l'intersection avec le plan du panneau, pour que le rayon
+            // garde la bonne profondeur même quand le joueur ne vise encore aucune étoile.
+            Plane p = new Plane(_canvasRoot.transform.forward, _canvasRoot.transform.position);
+            bool hitsPlane = p.Raycast(ray, out float enter);
+            if (hitsPlane) hitPoint = ray.GetPoint(enter);
 
-                    // 2. Vérification pour l'APPARITION DU LASER (hitbox plus large)
-                    Vector2 laserSize = r.size * laserActivationHitboxTolerance;
-                    Rect laserHitbox = new Rect(r.center - laserSize * 0.5f, laserSize);
-                    if (laserHitbox.Contains(localPoint))
+            for (int i = 0; hitsPlane && i < _starRects.Count; i++)
+            {
+                Vector3 worldPoint = ray.GetPoint(enter);
+                Vector3 localPoint = _starRects[i].InverseTransformPoint(worldPoint);
+
+                Rect r = _starRects[i].rect;
+
+                // 1. Vérification pour la SELECTION (hitbox serrée)
+                Vector2 selectionSize = r.size * hitboxTolerance;
+                Rect selectionHitbox = new Rect(r.center - selectionSize * 0.5f, selectionSize);
+
+                if (selectionHitbox.Contains(localPoint))
+                {
+                    if (enter < closestDist)
                     {
-                        potentialHover = i + 1;
-                        if (hoveredRating == 0) hitPoint = worldPoint; // On pointe vers l'étoile même en tolérance large
+                        closestDist = enter;
+                        hoveredRating = i + 1;
+                        hitPoint = worldPoint;
                     }
+                }
+
+                // 2. Hitbox élargie : déclenche l'apparition du rayon et l'accroche à l'étoile
+                //    la plus proche, même quand la visée n'est pas assez précise pour sélectionner.
+                Vector2 laserSize = r.size * laserActivationHitboxTolerance;
+                Rect laserHitbox = new Rect(r.center - laserSize * 0.5f, laserSize);
+                if (laserHitbox.Contains(localPoint))
+                {
+                    potentialHover = i + 1;
+                    if (hoveredRating == 0) hitPoint = worldPoint;
                 }
             }
 
             // Update Line Renderer
             if (useLineRenderer && _lineRenderer != null)
             {
-                bool targetVisible = (potentialHover > 0);
-                
-                // Fade In/Out
-                float targetAlpha = targetVisible ? 1f : 0f;
+                // Le rayon n'apparaît que lorsque la visée entre dans la zone des étoiles.
+                float targetAlpha = potentialHover > 0 ? 1f : 0f;
                 _currentLaserAlpha = Mathf.MoveTowards(_currentLaserAlpha, targetAlpha, Time.deltaTime * laserFadeSpeed);
                 
                 _lineRenderer.enabled = (_currentLaserAlpha > 0.01f);
@@ -558,7 +597,17 @@ namespace VBO_Ultimate.Runtime.Scripts.UI
                 {
                     // Effet d'arc de cercle avec courbe de Bézier
                     // Le point 0 est l'arme, le dernier point est l'impact lissé (_smoothHitPoint)
-                    _smoothHitPoint = Vector3.Lerp(_smoothHitPoint, hitPoint, Time.deltaTime * laserLagSpeed);
+                    // Au premier affichage on colle le point lissé sur la visée : sinon le rayon
+                    // part de l'origine du monde et balaie la scène pendant sa convergence.
+                    if (_laserNeedsSnap)
+                    {
+                        _smoothHitPoint = hitPoint;
+                        _laserNeedsSnap = false;
+                    }
+                    else
+                    {
+                        _smoothHitPoint = Vector3.Lerp(_smoothHitPoint, hitPoint, Time.deltaTime * laserLagSpeed);
+                    }
                     
                     Vector3 startPos = weapon0.beginRaycast.position;
                     Vector3 endPos = _smoothHitPoint;
@@ -655,6 +704,36 @@ namespace VBO_Ultimate.Runtime.Scripts.UI
                 
                 _currentHoldTimer = 0f;
             }
+        }
+
+        /// <summary>
+        /// Première arme réellement exploitable pour le laser. On ne peut pas se contenter de
+        /// currentweapons[0] : la liste conserve les entrées des armes détruites (changement de
+        /// scène en fin de partie, respawn du rig…), et une entrée morte en tête faisait basculer
+        /// toute la notation en mode regard — donc plus aucun laser à l'écran de fin.
+        /// </summary>
+        private _Weapon ResolveWeapon()
+        {
+            var registry = VaroniaWeapon.Instance;
+            if (registry == null) return null;
+
+            var list = registry.currentweapons;
+
+            // Purge des entrées détruites (Unity les laisse dans la liste en "fake null").
+            for (int i = list.Count - 1; i >= 0; i--)
+                if (list[i] == null) list.RemoveAt(i);
+
+            // Priorité à une arme active (son tracking est à jour).
+            for (int i = 0; i < list.Count; i++)
+                if (list[i].beginRaycast != null && list[i].gameObject.activeInHierarchy)
+                    return list[i];
+
+            // Sinon on accepte une arme désactivée : mieux vaut un laser figé que pas de laser.
+            for (int i = 0; i < list.Count; i++)
+                if (list[i].beginRaycast != null)
+                    return list[i];
+
+            return null;
         }
 
         private bool _gazeMode;
@@ -965,34 +1044,56 @@ namespace VBO_Ultimate.Runtime.Scripts.UI
             ShowRating(false);
         }
 
+        /// <summary>
+        /// Code langue courant, normalisé sur 2 lettres majuscules ("FR", "EN", …).
+        /// Tolère les variantes régionales du GlobalConfig ("fr-FR", "pt_BR", "zh-Hans") en ne
+        /// gardant que le préfixe, et retombe sur "EN" si la config n'est pas encore chargée.
+        /// </summary>
+        private static string CurrentLangCode()
+        {
+            string lang = null;
+            if (BackOfficeVaronia.Instance != null && BackOfficeVaronia.Instance.config != null)
+                lang = BackOfficeVaronia.Instance.config.Language;
+
+            if (string.IsNullOrEmpty(lang)) return "EN";
+
+            lang = lang.Trim();
+            if (lang.Length > 2) lang = lang.Substring(0, 2);
+            return lang.ToUpperInvariant();
+        }
+
         private string GetLocalizedThankYou()
         {
-            string lang = "Fr";
-            if (BackOfficeVaronia.Instance != null && BackOfficeVaronia.Instance.config != null)
+            switch (CurrentLangCode())
             {
-                lang = BackOfficeVaronia.Instance.config.Language;
+                case "FR": return thankYouFR;
+                case "ES": return thankYouES;
+                case "DE": return thankYouDE;
+                case "IT": return thankYouIT;
+                case "PT": return thankYouPT;
+                case "RU": return thankYouRU;
+                case "ZH": return thankYouZH;
+                case "JA": return thankYouJA;
+                case "AR": return thankYouAR;
+                default:   return thankYouEN; // EN + toute langue non gérée
             }
-
-            if (string.Equals(lang, "Fr", StringComparison.OrdinalIgnoreCase)) return thankYouFR;
-            if (string.Equals(lang, "En", StringComparison.OrdinalIgnoreCase)) return thankYouEN;
-            if (string.Equals(lang, "Es", StringComparison.OrdinalIgnoreCase)) return thankYouES;
-            
-            return thankYouEN; // Default
         }
 
         private string GetLocalizedText()
         {
-            string lang = "Fr";
-            if (BackOfficeVaronia.Instance != null && BackOfficeVaronia.Instance.config != null)
+            switch (CurrentLangCode())
             {
-                lang = BackOfficeVaronia.Instance.config.Language;
+                case "FR": return textFR;
+                case "ES": return textES;
+                case "DE": return textDE;
+                case "IT": return textIT;
+                case "PT": return textPT;
+                case "RU": return textRU;
+                case "ZH": return textZH;
+                case "JA": return textJA;
+                case "AR": return textAR;
+                default:   return textEN; // EN + toute langue non gérée
             }
-
-            if (string.Equals(lang, "Fr", StringComparison.OrdinalIgnoreCase)) return textFR;
-            if (string.Equals(lang, "En", StringComparison.OrdinalIgnoreCase)) return textEN;
-            if (string.Equals(lang, "Es", StringComparison.OrdinalIgnoreCase)) return textES;
-            
-            return textEN; // Default
         }
 
         private IEnumerator PulseRatingEffect(int rating)
@@ -1015,6 +1116,8 @@ namespace VBO_Ultimate.Runtime.Scripts.UI
                 IsRatingDisplayed = true;
                 isShowingThankYou = false;
                 _isProcessingSelection = false;
+                _laserNeedsSnap = true;
+                _currentLaserAlpha = 0f;
                 StopChargeSound();
 
                 if (_canvasRoot != null)
@@ -1113,6 +1216,28 @@ namespace VBO_Ultimate.Runtime.Scripts.UI
         public static void ToggleRating()
         {
             if (Instance != null) Instance.ShowRating(!Instance.isVisible);
+        }
+
+        /// <summary>
+        /// Affiche la notation après <paramref name="delay"/> secondes, le décompte tournant sur
+        /// l'instance (DontDestroyOnLoad) et non sur l'appelant. En fin de partie l'objet qui
+        /// déclenche la notation (joueur, HUD…) est souvent détruit par le changement de scène
+        /// avant la fin du délai : sa coroutine mourait avec lui et la notation ne sortait jamais.
+        /// </summary>
+        public static void ShowRatingAfter(float delay)
+        {
+            if (Instance == null)
+            {
+                Debug.LogWarning("[Rating3DUI] ShowRatingAfter appelé sans instance en scène.");
+                return;
+            }
+            Instance.StartCoroutine(Instance.ShowAfterRoutine(delay));
+        }
+
+        private IEnumerator ShowAfterRoutine(float delay)
+        {
+            yield return new WaitForSeconds(delay);
+            ShowRating(true);
         }
 
         /// <summary>

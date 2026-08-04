@@ -53,6 +53,14 @@ namespace VaroniaBackOffice
 
         public void Apply()
         {
+            // DontUseSpatialSync : on ne touche NI au transform, NI à la boundary.
+            // L'objet reste exactement tel qu'il est placé dans la scène.
+            if (GlobalConfig.SpatialSyncDisabled)
+            {
+                Debug.Log("[VaroniaSync] DontUseSpatialSync = true → synchronisation et boundary ignorées.");
+                return;
+            }
+
             var spatial = VaroniaSpatialLoader.Data as Spatial;
             if (spatial == null)
             {

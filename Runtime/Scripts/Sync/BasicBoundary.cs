@@ -54,6 +54,10 @@ namespace VaroniaBackOffice
         {
             Clear();
 
+            // DontUseSpatialSync : une boundary posée manuellement dans la scène ne construit rien.
+            if (GlobalConfig.SpatialSyncDisabled)
+                return;
+
             var spatial = VaroniaSpatialLoader.Data as Spatial;
             if (spatial?.Boundaries == null || spatial.Boundaries.Count == 0)
             {

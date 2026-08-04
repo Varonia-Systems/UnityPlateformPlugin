@@ -108,6 +108,24 @@ namespace VaroniaBackOffice
 
 
         public bool Direct;
+
+        [Header("Spatial")]
+        /// <summary>
+        /// Si true, tout le système spatial est neutralisé : VaroniaSync n'applique pas
+        /// SyncPos / SyncQuaterion et n'instancie aucune boundary, et une boundary posée
+        /// manuellement dans la scène ne construit rien.
+        /// Par défaut false = fonctionnement normal.
+        /// </summary>
+        public bool DontUseSpatialSync = false;
+
+        /// <summary>
+        /// True si le spatial doit être ignoré (voir <see cref="DontUseSpatialSync"/>).
+        /// Lecture défensive : renvoie false tant que la config n'est pas chargée.
+        /// </summary>
+        public static bool SpatialSyncDisabled =>
+            BackOfficeVaronia.Instance != null
+            && BackOfficeVaronia.Instance.config != null
+            && BackOfficeVaronia.Instance.config.DontUseSpatialSync;
         
         
         
