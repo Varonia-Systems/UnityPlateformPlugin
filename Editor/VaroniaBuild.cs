@@ -610,6 +610,24 @@ namespace VaroniaBackOffice
                 var clearBtnStyle = new GUIStyle(buttonStyle);
                 clearBtnStyle.fontSize = 9;
                 clearBtnStyle.padding  = new RectOffset(10, 10, 4, 4);
+
+                // Copie le changelog EXACTEMENT tel qu'il sera écrit dans Changelog.txt au build
+                // (même en-tête, mêmes catégories, mêmes puces) — utile pour le coller ailleurs
+                // sans avoir à lancer un build.
+                bool hasChangelog = !string.IsNullOrEmpty(ChangelogAdded)   || !string.IsNullOrEmpty(ChangelogChanged)
+                                 || !string.IsNullOrEmpty(ChangelogFixed)   || !string.IsNullOrEmpty(ChangelogRemoved)
+                                 || !string.IsNullOrEmpty(ChangelogNotes);
+
+                using (new EditorGUI.DisabledScope(!hasChangelog))
+                    if (GUILayout.Button("Copy changelog on clipboard", clearBtnStyle, GUILayout.Height(22), GUILayout.Width(190)))
+                    {
+                        EditorGUIUtility.systemCopyBuffer =
+                            BuildChangelogText(hasGameId ? gameId.Trim() : "—");
+                        ShowNotification(new GUIContent("Changelog copié"));
+                    }
+
+                GUILayout.Space(4);
+
                 if (GUILayout.Button("Vider les champs", clearBtnStyle, GUILayout.Height(22), GUILayout.Width(120)))
                 {
                     ChangelogAdded = ChangelogChanged = ChangelogFixed = ChangelogRemoved = ChangelogNotes = "";

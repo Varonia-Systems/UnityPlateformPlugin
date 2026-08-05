@@ -653,8 +653,11 @@ namespace VBO_Ultimate.Runtime.Scripts.UI
                 }
             }
 
-            // Interaction clic avec maintien
-            if (hoveredRating > 0 && VaroniaInput.GetButton(0, VaroniaButton.Primary))
+            // Interaction clic avec maintien.
+            // L'overload sans index cible VaroniaWeaponRegistry.DefaultIndex : l'index runtime est
+            // attribué dynamiquement par le registry et n'est PAS forcément le slot 0. En dur, le
+            // rating écoutait la gâchette d'une autre arme que celle du joueur en multi-arme.
+            if (hoveredRating > 0 && VaroniaInput.GetButton(VaroniaButton.Primary))
             {
                 if (_lastInteractingStar == hoveredRating)
                 {
