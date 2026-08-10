@@ -577,6 +577,41 @@ namespace VaroniaBackOffice
                 DrawStatusRow("7-Zip",       has7Zip,      "OK",   "Not set",  isError: true);
                 DrawStatusRow("Server Path", hasServer,    "OK",   "Not set",  isError: false);
                 DrawStatusRow("Content",     hasContent,   "Found","Missing",  isError: false);
+
+                // ── Import de la loca locale vers la source de content ──
+                string langSrc     = Application.persistentDataPath + "/Language";
+                string contentRoot = EditorPrefs.GetString("VBO_ContentSourcePath");
+                string langDst     = contentRoot + "/" + Application.productName + "/Language";
+                bool   hasLangSrc  = Directory.Exists(langSrc);
+                bool   hasDstRoot  = !string.IsNullOrEmpty(contentRoot);
+
+                EditorGUILayout.Space(6);
+                DrawDivider();
+                EditorGUILayout.Space(6);
+
+                DrawStatusRow("Language (local)", hasLangSrc,
+                    hasLangSrc ? string.Join(", ", LanguageFolders(langSrc)) : "",
+                    "Aucun dossier Language", isError: false);
+
+                EditorGUILayout.Space(4);
+                EditorGUILayout.BeginHorizontal();
+                GUILayout.FlexibleSpace();
+
+                var importBtnStyle = new GUIStyle(buttonStyle)
+                {
+                    fontSize = 9,
+                    padding  = new RectOffset(10, 10, 4, 4),
+                };
+
+                using (new EditorGUI.DisabledScope(!hasLangSrc || !hasDstRoot))
+                    if (GUILayout.Button(new GUIContent("📥  Importer Language → Content",
+                            hasDstRoot
+                                ? "Copie le dossier Language de cette machine dans la source de content, qui part dans Content.zip."
+                                : "Renseigne d'abord le Content Source Path dans les réglages."),
+                            importBtnStyle, GUILayout.Height(22), GUILayout.Width(210)))
+                        ImportLanguageToContent(langSrc, langDst);
+
+                EditorGUILayout.EndHorizontal();
             }, statusAccent);
 
             EditorGUILayout.Space(8);
@@ -950,6 +985,165 @@ namespace VaroniaBackOffice
         }
 
         void DrawSectionLabel(string text) => GUILayout.Label(text, sectionStyle);
+
+        // ═════════════════════════════════════════════════════════════════════
+        //  Import Language → source de content
+        // ═════════════════════════════════════════════════════════════════════
+
+        /// <summary>Noms des sous-dossiers de langue présents (Fr, En, Es…).</summary>
+        static string[] LanguageFolders(string root)
+        {
+            try
+            {
+                var dirs = Directory.GetDirectories(root);
+                var names = new string[dirs.Length];
+                for (int i = 0; i < dirs.Length; i++) names[i] = Path.GetFileName(dirs[i]);
+                return names;
+            }
+            catch { return new string[0]; }
+        }
+
+        /// <summary>
+        /// Copie le dossier Language de CETTE machine (persistentDataPath, celui qu'édite le
+        /// Language Editor) dans la source de content, qui est compressée en Content.zip puis
+        /// poussée sur tous les postes. Opération destructive à destination → confirmation requise.
+        /// </summary>
+        void ImportLanguageToContent(string src, string dst)
+        {
+            bool dstExists = Directory.Exists(dst);
+            var  srcLangs  = LanguageFolders(src);
+            var  dstLangs  = dstExists ? LanguageFolders(dst) : new string[0];
+
+            // Langues présentes à destination mais absentes en local : elles seraient PERDUES.
+            var lost = new List<string>();
+            foreach (var d in dstLangs)
+            {
+                bool found = false;
+                foreach (var s in srcLangs)
+                    if (string.Equals(s, d, StringComparison.OrdinalIgnoreCase)) { found = true; break; }
+                if (!found) lost.Add(d);
+            }
+
+            string msg =
+                "Le dossier Language de CETTE machine va être copié dans la source de content.\n\n" +
+                $"Source        : {src}\n" +
+                $"Destination : {dst}\n\n" +
+                $"Langues locales : {(srcLangs.Length > 0 ? string.Join(", ", srcLangs) : "(aucune)")}\n\n";
+
+            if (dstExists)
+            {
+                msg += "⚠  Un dossier Language existe DÉJÀ à destination : il sera intégralement remplacé.\n";
+                if (lost.Count > 0)
+                    msg += $"⚠  Ces langues présentes à destination seront PERDUES : {string.Join(", ", lost)}\n";
+                msg += "\n";
+            }
+
+            msg += "Cette source est celle qui part dans Content.zip vers tous les postes.\n" +
+                   "Assure-toi que ta loca locale est bien la version de référence.";
+
+            if (!EditorUtility.DisplayDialog("Importer Language dans le content", msg,
+                                             dstExists ? "Importer et remplacer" : "Importer", "Annuler"))
+                return;
+
+            try
+            {
+                EditorUtility.DisplayProgressBar("Import Language", "Suppression de l'ancienne version…", 0.15f);
+                if (dstExists) DeleteDirectoryAndWait(dst);
+
+                EditorUtility.DisplayProgressBar("Import Language", "Copie en cours…", 0.4f);
+                CopyDirectory(src, dst);
+
+                EditorUtility.ClearProgressBar();
+                ShowNotification(new GUIContent("Language importé"));
+                UnityEngine.Debug.Log($"[VaroniaBuild] Language importé : {src}  →  {dst}");
+            }
+            catch (Exception e)
+            {
+                EditorUtility.ClearProgressBar();
+                EditorUtility.DisplayDialog("Import impossible",
+                    "La copie a échoué :\n\n" + e.Message +
+                    "\n\nLa destination peut être partiellement écrite : vérifie-la avant de builder.", "OK");
+                UnityEngine.Debug.LogError("[VaroniaBuild] Import Language échoué : " + e);
+            }
+        }
+
+        // La destination est très souvent un partage réseau (\\serveur\ContentSource...). Sur SMB :
+        //   • Directory.Delete(recursive) rend la main AVANT que le serveur ait fini de supprimer ;
+        //   • le cache de répertoires peut faire échouer la création d'un sous-dossier juste après
+        //     celle de son parent (DirectoryNotFoundException sur un chemin pourtant valide).
+        // D'où l'attente de suppression effective et les retries ci-dessous.
+
+        const int NetRetries  = 5;
+        const int NetDelayMs  = 400;
+
+        /// <summary>Supprime un dossier et NE REND LA MAIN QUE lorsqu'il a réellement disparu.</summary>
+        static void DeleteDirectoryAndWait(string path)
+        {
+            if (!Directory.Exists(path)) return;
+
+            for (int attempt = 0; attempt <= NetRetries; attempt++)
+            {
+                try { Directory.Delete(path, true); }
+                catch (IOException)                 when (attempt < NetRetries) { }
+                catch (UnauthorizedAccessException) when (attempt < NetRetries) { }
+
+                // Le partage peut mettre un instant à refléter la suppression.
+                for (int w = 0; w < 20 && Directory.Exists(path); w++)
+                    System.Threading.Thread.Sleep(NetDelayMs / 4);
+
+                if (!Directory.Exists(path)) return;
+            }
+
+            throw new IOException(
+                $"Impossible de supprimer '{path}'.\nUn fichier y est peut-être ouvert, " +
+                "ou le partage réseau ne répond pas.");
+        }
+
+        /// <summary>CreateDirectory tolérant aux latences réseau.</summary>
+        static void EnsureDirectory(string path)
+        {
+            for (int attempt = 0; attempt < NetRetries; attempt++)
+            {
+                try
+                {
+                    Directory.CreateDirectory(path);
+                    if (Directory.Exists(path)) return;
+                }
+                // DirectoryNotFoundException dérive d'IOException : ce catch la couvre aussi.
+                catch (IOException) { }
+
+                System.Threading.Thread.Sleep(NetDelayMs);
+            }
+
+            // Dernière tentative sans filet : laisse remonter l'exception réelle si ça échoue encore.
+            Directory.CreateDirectory(path);
+        }
+
+        static void CopyFileWithRetry(string src, string dst)
+        {
+            for (int attempt = 0; attempt < NetRetries; attempt++)
+            {
+                try { File.Copy(src, dst, true); return; }
+                // Le plus dérivé d'abord : DirectoryNotFoundException hérite d'IOException.
+                // Cas typique du réseau : le dossier parent n'est pas encore visible → on le recrée.
+                catch (DirectoryNotFoundException) { EnsureDirectory(Path.GetDirectoryName(dst)); }
+                catch (IOException)                { }
+
+                System.Threading.Thread.Sleep(NetDelayMs);
+            }
+            File.Copy(src, dst, true);
+        }
+
+        static void CopyDirectory(string src, string dst)
+        {
+            EnsureDirectory(dst);
+
+            foreach (var file in Directory.GetFiles(src))
+                CopyFileWithRetry(file, Path.Combine(dst, Path.GetFileName(file)));
+
+            foreach (var dir in Directory.GetDirectories(src))
+                CopyDirectory(dir, Path.Combine(dst, Path.GetFileName(dir)));
+        }
 
         void DrawDivider()
         {
