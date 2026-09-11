@@ -1,12 +1,14 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Text.RegularExpressions;
+using System.Threading.Tasks;
 using UnityEditor;
 using UnityEditor.PackageManager;
 using UnityEditor.PackageManager.Requests;
 using UnityEngine;
-using UnityEngine.Networking;
+using Debug = UnityEngine.Debug;
 
 // UnityEditor.PackageInfo (legacy, obsolète) entre en conflit avec celui du Package Manager.
 using PackageInfo = UnityEditor.PackageManager.PackageInfo;
@@ -16,28 +18,45 @@ namespace VaroniaBackOffice.EditorTools
     /// <summary>État de comparaison local/distant d'un package Varonia.</summary>
     internal class VaroniaPackageStatus
     {
-        public string Name;           // com.varonia.xxx
+        public string Name;            // com.varonia.xxx
         public string DisplayName;
         public string LocalVersion;
-        public string RemoteVersion;
-        public string RepoOwner;      // Varonia-Systems
-        public string RepoName;       // UnityVBO
-        public string Error;          // message si la vérification a échoué
+        public string GitUrl;          // URL UPM complète (peut contenir #branche)
+        public string Branch;          // branche/tag demandée (null = HEAD par défaut du dépôt)
+        public bool   IsLocalFolder;   // installé en file:/embedded (machine de dev)
+        public string LocalPath;       // resolvedPath si dossier local
 
-        public bool Checked  => RemoteVersion != null || Error != null;
-        public bool HasUpdate => RemoteVersion != null &&
-                                 VaroniaPackageUpdateChecker.CompareSemver(RemoteVersion, LocalVersion) > 0;
-        public string RepoUrl => RepoOwner != null ? $"https://github.com/{RepoOwner}/{RepoName}" : null;
+        public string LocalHash;       // commit installé (UPM) ou HEAD du dossier local
+        public string RemoteHash;      // HEAD distant
+        public int    AheadCount;      // dossier local : commits non poussés
+        public int    DirtyCount;      // dossier local : fichiers modifiés non commités
+        public string Error;
+
+        public volatile bool Done;
+
+        public bool Checked   => Done;
+        public bool HasUpdate => Done && Error == null && RemoteHash != null && LocalHash != null && RemoteHash != LocalHash;
+        public bool NeedsPush => Done && IsLocalFolder && (AheadCount > 0 || DirtyCount > 0);
+
+        public string RepoUrl
+        {
+            get
+            {
+                var m = Regex.Match(GitUrl ?? "", @"(https?://[^#?]+?)(\.git)?(\?|#|$)");
+                return m.Success ? m.Groups[1].Value : null;
+            }
+        }
+
+        public static string Short(string hash) => string.IsNullOrEmpty(hash) ? "?" : hash.Substring(0, Math.Min(7, hash.Length));
     }
 
     /// <summary>
-    /// Compare la version locale de chaque package Varonia (com.varonia.*) à celle du
-    /// package.json publié sur son dépôt GitHub, et signale les mises à jour disponibles.
-    /// Purement informatif : aucune mise à jour n'est appliquée automatiquement.
+    /// Compare le commit installé de chaque package Varonia (com.varonia.*) au HEAD de son dépôt Git
+    /// via <c>git ls-remote</c> (identifiants Git de la machine : fonctionne sur les dépôts privés,
+    /// exactement comme le Package Manager). Propose la mise à jour (Client.Add).
     ///
-    /// Le dépôt est déduit :
-    ///   • du remote git du dossier du package (installation locale "file:", cas des développeurs) ;
-    ///   • ou de l'URL UPM du package s'il a été installé directement depuis Git (cas des jeux).
+    /// Packages installés en <c>file:</c> (poste de développeur) : compare le HEAD du dossier au distant
+    /// et signale les commits non poussés / fichiers non commités.
     /// </summary>
     [InitializeOnLoad]
     internal static class VaroniaPackageUpdateChecker
@@ -50,9 +69,12 @@ namespace VaroniaBackOffice.EditorTools
         private static ListRequest _listRequest;
         private static bool _running;
         private static bool _openWindowWhenDone;
+        private static bool _openOnlyIfUpdate;
 
         internal static IReadOnlyList<VaroniaPackageStatus> Statuses => _statuses;
         internal static bool IsRunning => _running;
+        internal static bool IsUpdating => _updateQueue.Count > 0 || _addRequest != null;
+        internal static string UpdatingName => _addRequest != null ? _updatingName : null;
 
         internal static bool AutoCheckEnabled
         {
@@ -69,14 +91,10 @@ namespace VaroniaBackOffice.EditorTools
         private static void AutoCheckIfDue()
         {
             if (!AutoCheckEnabled) return;
-
             long ticks = 0;
             long.TryParse(EditorPrefs.GetString(PrefLastCheck, "0"), out ticks);
             var last = ticks > 0 ? new DateTime(ticks) : DateTime.MinValue;
-
             if ((DateTime.UtcNow - last).TotalHours < CheckIntervalHours) return;
-
-            // Vérification silencieuse : la fenêtre ne s'ouvre que s'il y a effectivement du neuf.
             Check(openWindowWhenDone: false, openOnlyIfUpdate: true);
         }
 
@@ -87,20 +105,18 @@ namespace VaroniaBackOffice.EditorTools
             if (_statuses.Count == 0 && !_running) Check(openWindowWhenDone: false);
         }
 
-        private static bool _openOnlyIfUpdate;
+        // ─── Vérification ─────────────────────────────────────────────────────────
 
         internal static void Check(bool openWindowWhenDone, bool openOnlyIfUpdate = false)
         {
             if (_running) return;
-
             _running            = true;
             _openWindowWhenDone = openWindowWhenDone;
             _openOnlyIfUpdate   = openOnlyIfUpdate;
             _statuses.Clear();
             EditorPrefs.SetString(PrefLastCheck, DateTime.UtcNow.Ticks.ToString());
 
-            // offlineMode = true : on ne veut que la liste locale, pas un refresh du registre.
-            _listRequest = Client.List(true, false);
+            _listRequest = Client.List(true, false); // liste locale uniquement, pas de refresh du registre
             EditorApplication.update += PollList;
         }
 
@@ -123,171 +139,208 @@ namespace VaroniaBackOffice.EditorTools
 
                 var st = new VaroniaPackageStatus
                 {
-                    Name         = pkg.name,
-                    DisplayName  = string.IsNullOrEmpty(pkg.displayName) ? pkg.name : pkg.displayName,
-                    LocalVersion = pkg.version,
+                    Name          = pkg.name,
+                    DisplayName   = string.IsNullOrEmpty(pkg.displayName) ? pkg.name : pkg.displayName,
+                    LocalVersion  = pkg.version,
+                    IsLocalFolder = pkg.source == PackageSource.Local || pkg.source == PackageSource.Embedded,
+                    LocalPath     = pkg.resolvedPath,
                 };
 
-                string gitUrl = ResolveGitUrl(pkg);
-                if (!TryParseGitHub(gitUrl, out st.RepoOwner, out st.RepoName))
-                    st.Error = "Aucun dépôt GitHub détecté (package non versionné ?)";
+                if (pkg.source == PackageSource.Git)
+                {
+                    // packageId = "<nom>@<url git>[#revision]"
+                    int at = pkg.packageId.IndexOf('@');
+                    st.GitUrl    = at >= 0 ? pkg.packageId.Substring(at + 1) : null;
+                    st.LocalHash = pkg.git != null ? pkg.git.hash : null;
+                    st.Branch    = pkg.git != null && !string.IsNullOrEmpty(pkg.git.revision) ? pkg.git.revision : null;
+                    if (st.GitUrl == null) st.Error = "URL Git introuvable";
+                }
+                else if (st.IsLocalFolder)
+                {
+                    st.GitUrl = ReadRemoteFromGitConfig(pkg.resolvedPath);
+                    if (st.GitUrl == null) st.Error = "Dossier local sans dépôt Git (ou sans remote)";
+                }
+                else st.Error = "Source " + pkg.source + " non gérée";
 
+                if (st.Error != null) st.Done = true;
                 _statuses.Add(st);
             }
 
             _statuses.Sort((a, b) => string.Compare(a.DisplayName, b.DisplayName, StringComparison.OrdinalIgnoreCase));
 
-            _pending = 0;
             foreach (var st in _statuses)
-                if (st.Error == null) { _pending++; FetchRemoteVersion(st); }
+                if (!st.Done) { var s = st; Task.Run(() => Probe(s)); }
 
-            if (_pending == 0) Finish();
+            EditorApplication.update += PollProbes;
             VaroniaPackageUpdateWindow.RepaintIfOpen();
         }
 
-        private static int _pending;
-
-        /// <summary>URL git du package : celle d'UPM si installé depuis Git, sinon le remote du dossier.</summary>
-        private static string ResolveGitUrl(PackageInfo pkg)
+        private static void PollProbes()
         {
-            // Installé depuis Git : packageId vaut "<nom>@<url git>". On n'utilise pas PackageInfo.repository,
-            // absent des versions d'Unity les plus anciennes supportées par le package.
-            if (pkg.source == PackageSource.Git && !string.IsNullOrEmpty(pkg.packageId))
-            {
-                int at = pkg.packageId.IndexOf('@');
-                if (at >= 0 && at < pkg.packageId.Length - 1)
-                    return pkg.packageId.Substring(at + 1);
-            }
+            foreach (var st in _statuses)
+                if (!st.Done) { VaroniaPackageUpdateWindow.RepaintIfOpen(); return; }
+            EditorApplication.update -= PollProbes;
+            Finish();
+        }
 
-            // Installation locale (file:) ou embarquée → on lit le remote du dépôt du dossier.
+        /// <summary>Thread de fond : interroge le dépôt distant (et le dépôt local si file:).</summary>
+        private static void Probe(VaroniaPackageStatus st)
+        {
             try
             {
-                string cfg = Path.Combine(pkg.resolvedPath ?? "", ".git/config");
-                if (File.Exists(cfg))
+                string url     = StripRevision(st.GitUrl);
+                string refName = string.IsNullOrEmpty(st.Branch) ? "HEAD" : st.Branch;
+
+                var remote = RunGit("ls-remote \"" + url + "\" " + refName, null);
+                if (remote.code != 0 || string.IsNullOrWhiteSpace(remote.stdout))
                 {
-                    var m = Regex.Match(File.ReadAllText(cfg), @"url\s*=\s*(\S+github\.com\S+)",
-                                        RegexOptions.IgnoreCase);
-                    if (m.Success) return m.Groups[1].Value;
+                    st.Error = "ls-remote a échoué : " + Truncate(remote.stderr, 160);
+                    return;
+                }
+                st.RemoteHash = remote.stdout.Trim().Split('\t', ' ')[0];
+
+                if (st.IsLocalFolder)
+                {
+                    var head = RunGit("rev-parse HEAD", st.LocalPath);
+                    st.LocalHash = head.code == 0 ? head.stdout.Trim() : null;
+
+                    var ahead = RunGit("rev-list --count @{u}..HEAD", st.LocalPath);
+                    int.TryParse(ahead.stdout.Trim(), out st.AheadCount);
+
+                    var status = RunGit("status --porcelain", st.LocalPath);
+                    int dirty = 0;
+                    foreach (var line in status.stdout.Split('\n'))
+                        if (line.Trim().Length > 0 && !line.Contains(".claude")) dirty++;
+                    st.DirtyCount = dirty;
                 }
             }
-            catch { /* dossier illisible : traité comme 'pas de dépôt' */ }
-
-            return null;
-        }
-
-        /// <summary>Extrait owner/repo d'une URL GitHub (forme https ou ssh).</summary>
-        private static bool TryParseGitHub(string url, out string owner, out string repo)
-        {
-            owner = repo = null;
-            if (string.IsNullOrEmpty(url)) return false;
-
-            var m = Regex.Match(url, @"github\.com[/:]([^/]+)/([^/\s]+?)(\.git)?(\?|#|$)",
-                                RegexOptions.IgnoreCase);
-            if (!m.Success) return false;
-
-            owner = m.Groups[1].Value;
-            repo  = m.Groups[2].Value;
-            return true;
-        }
-
-        // ─── Récupération de la version distante ────────────────────────────────────
-
-        private static void FetchRemoteVersion(VaroniaPackageStatus st)
-        {
-            TryBranch(st, "main", () => TryBranch(st, "master", () =>
-            {
-                st.Error = "package.json introuvable (dépôt privé, ou branche autre que main/master)";
-                OnePackageDone();
-            }));
-        }
-
-        private static void TryBranch(VaroniaPackageStatus st, string branch, Action onFail)
-        {
-            string url = $"https://raw.githubusercontent.com/{st.RepoOwner}/{st.RepoName}/{branch}/package.json";
-            var req = UnityWebRequest.Get(url);
-            req.timeout = 10;
-            var op = req.SendWebRequest();
-
-            void Poll()
-            {
-                if (!op.isDone) return;
-                EditorApplication.update -= Poll;
-
-#if UNITY_2020_1_OR_NEWER
-                bool ok = req.result == UnityWebRequest.Result.Success;
-#else
-                bool ok = !(req.isNetworkError || req.isHttpError);
-#endif
-                if (ok)
-                {
-                    st.RemoteVersion = ExtractVersion(req.downloadHandler.text);
-                    if (st.RemoteVersion == null)
-                        st.Error = "Version illisible dans le package.json distant";
-                    req.Dispose();
-                    OnePackageDone();
-                }
-                else
-                {
-                    req.Dispose();
-                    onFail();
-                }
-            }
-
-            EditorApplication.update += Poll;
-        }
-
-        /// <summary>Lit le champ "version" d'un package.json sans dépendre d'un désérialiseur.</summary>
-        private static string ExtractVersion(string json)
-        {
-            if (string.IsNullOrEmpty(json)) return null;
-            var m = Regex.Match(json, "\"version\"\\s*:\\s*\"([^\"]+)\"");
-            return m.Success ? m.Groups[1].Value : null;
-        }
-
-        private static void OnePackageDone()
-        {
-            _pending--;
-            VaroniaPackageUpdateWindow.RepaintIfOpen();
-            if (_pending <= 0) Finish();
+            catch (Exception e) { st.Error = e.Message; }
+            finally { st.Done = true; }
         }
 
         private static void Finish()
         {
             _running = false;
+            bool anyNews = false;
+            foreach (var s in _statuses) if (s.HasUpdate || s.NeedsPush) { anyNews = true; break; }
 
-            bool anyUpdate = false;
-            foreach (var s in _statuses) if (s.HasUpdate) { anyUpdate = true; break; }
+            if (anyNews)
+            {
+                var sb = new System.Text.StringBuilder("[Varonia] Packages : ");
+                foreach (var s in _statuses)
+                {
+                    if (s.HasUpdate) sb.Append(s.DisplayName).Append(" (mise à jour dispo) · ");
+                    if (s.NeedsPush) sb.Append(s.DisplayName).Append(" (travail local à pousser) · ");
+                }
+                Debug.Log(sb.ToString());
+            }
 
-            if (_openWindowWhenDone || (_openOnlyIfUpdate && anyUpdate))
+            if (_openWindowWhenDone || (_openOnlyIfUpdate && anyNews))
                 VaroniaPackageUpdateWindow.Open();
-
             VaroniaPackageUpdateWindow.RepaintIfOpen();
         }
 
-        // ─── Semver ────────────────────────────────────────────────────────────────
+        // ─── Mise à jour (Client.Add sur l'URL Git = bouton "Update" du Package Manager) ───
 
-        /// <summary>Compare deux versions "x.y.z" : &gt;0 si a est plus récente que b.
-        /// Les suffixes (-preview, +build) sont ignorés.</summary>
-        internal static int CompareSemver(string a, string b)
+        private static readonly Queue<VaroniaPackageStatus> _updateQueue = new Queue<VaroniaPackageStatus>();
+        private static AddRequest _addRequest;
+        private static string _updatingName;
+
+        internal static void Update(VaroniaPackageStatus st)
         {
-            int[] va = ParseSemver(a), vb = ParseSemver(b);
-            for (int i = 0; i < 3; i++)
-                if (va[i] != vb[i]) return va[i].CompareTo(vb[i]);
-            return 0;
+            if (st == null || st.IsLocalFolder || string.IsNullOrEmpty(st.GitUrl)) return;
+            _updateQueue.Enqueue(st);
+            if (_addRequest == null) StartNextUpdate();
         }
 
-        private static int[] ParseSemver(string v)
+        internal static void UpdateAll()
         {
-            var res = new int[3];
-            if (string.IsNullOrEmpty(v)) return res;
-
-            int cut = v.IndexOfAny(new[] { '-', '+' });
-            if (cut > 0) v = v.Substring(0, cut);
-
-            var parts = v.Split('.');
-            for (int i = 0; i < 3 && i < parts.Length; i++)
-                int.TryParse(parts[i], out res[i]);
-            return res;
+            foreach (var st in _statuses)
+                if (st.HasUpdate && !st.IsLocalFolder) _updateQueue.Enqueue(st);
+            if (_addRequest == null) StartNextUpdate();
         }
+
+        private static void StartNextUpdate()
+        {
+            if (_updateQueue.Count == 0) { _addRequest = null; VaroniaPackageUpdateWindow.RepaintIfOpen(); return; }
+            var st = _updateQueue.Dequeue();
+            _updatingName = st.DisplayName;
+            _addRequest = Client.Add(st.GitUrl);
+            EditorApplication.update += PollAdd;
+            VaroniaPackageUpdateWindow.RepaintIfOpen();
+        }
+
+        private static void PollAdd()
+        {
+            if (_addRequest == null || !_addRequest.IsCompleted) return;
+            EditorApplication.update -= PollAdd;
+
+            if (_addRequest.Status == StatusCode.Success)
+                Debug.Log("[Varonia] " + _addRequest.Result.name + " mis à jour → " + _addRequest.Result.version +
+                          (_addRequest.Result.git != null ? " @ " + VaroniaPackageStatus.Short(_addRequest.Result.git.hash) : ""));
+            else
+                Debug.LogError("[Varonia] Mise à jour de " + _updatingName + " échouée : " + _addRequest.Error?.message);
+
+            _addRequest = null;
+            if (_updateQueue.Count > 0) StartNextUpdate();
+            else EditorApplication.delayCall += () => Check(openWindowWhenDone: false); // rafraîchit les hashs affichés
+        }
+
+        // ─── Git helpers ──────────────────────────────────────────────────────────
+
+        private static string StripRevision(string url)
+        {
+            if (string.IsNullOrEmpty(url)) return url;
+            int hash = url.IndexOf('#');
+            if (hash >= 0) url = url.Substring(0, hash);
+            int q = url.IndexOf('?');
+            if (q >= 0) url = url.Substring(0, q);
+            return url;
+        }
+
+        /// <summary>Remote 'origin' du dépôt contenant le dossier (remonte jusqu'à 4 niveaux).</summary>
+        private static string ReadRemoteFromGitConfig(string folder)
+        {
+            try
+            {
+                string dir = folder;
+                for (int i = 0; i < 4 && !string.IsNullOrEmpty(dir); i++)
+                {
+                    string cfg = Path.Combine(dir, ".git", "config");
+                    if (File.Exists(cfg))
+                    {
+                        var m = Regex.Match(File.ReadAllText(cfg), @"url\s*=\s*(\S+)", RegexOptions.IgnoreCase);
+                        return m.Success ? m.Groups[1].Value : null;
+                    }
+                    dir = Path.GetDirectoryName(dir);
+                }
+            }
+            catch { /* dossier illisible : traité comme 'pas de dépôt' */ }
+            return null;
+        }
+
+        private static (int code, string stdout, string stderr) RunGit(string args, string workDir)
+        {
+            var psi = new ProcessStartInfo("git", args)
+            {
+                UseShellExecute        = false,
+                CreateNoWindow         = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError  = true,
+            };
+            if (!string.IsNullOrEmpty(workDir)) psi.WorkingDirectory = workDir;
+            psi.EnvironmentVariables["GIT_TERMINAL_PROMPT"] = "0"; // jamais de prompt bloquant
+
+            using (var p = Process.Start(psi))
+            {
+                string o = p.StandardOutput.ReadToEnd();
+                string e = p.StandardError.ReadToEnd();
+                if (!p.WaitForExit(20000)) { try { p.Kill(); } catch { } return (-1, o, "timeout git"); }
+                return (p.ExitCode, o, e);
+            }
+        }
+
+        private static string Truncate(string s, int n)
+            => string.IsNullOrEmpty(s) ? "" : (s.Length <= n ? s.Trim() : s.Substring(0, n).Trim() + "…");
     }
 }

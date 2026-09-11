@@ -4,8 +4,8 @@ using UnityEngine;
 namespace VaroniaBackOffice.EditorTools
 {
     /// <summary>
-    /// Fenêtre d'information sur les versions des packages Varonia.
-    /// Purement indicative : elle n'installe et ne modifie rien.
+    /// Fenêtre de suivi des packages Varonia : commit installé vs HEAD du dépôt Git,
+    /// mise à jour en un clic, et alerte "à pousser" pour les packages en dossier local.
     /// </summary>
     internal class VaroniaPackageUpdateWindow : EditorWindow
     {
@@ -20,7 +20,6 @@ namespace VaroniaBackOffice.EditorTools
         static readonly Color ColOrange = new Color(1.00f, 0.60f, 0.10f, 1f);
         static readonly Color ColPurple = new Color(0.65f, 0.35f, 1.00f, 1f);
         static readonly Color ColMuted  = new Color(0.60f, 0.60f, 0.66f, 1f);
-        static readonly Color ColSep    = new Color(1f, 1f, 1f, 0.06f);
 
         static GUIStyle _card, _title, _desc, _version;
         static Texture2D _cardTex;
@@ -28,15 +27,12 @@ namespace VaroniaBackOffice.EditorTools
         internal static void Open()
         {
             var w = GetWindow<VaroniaPackageUpdateWindow>(false, "Packages Varonia");
-            w.minSize = new Vector2(520, 260);
+            w.minSize = new Vector2(560, 280);
             w.Show();
             w.Focus();
         }
 
-        internal static void RepaintIfOpen()
-        {
-            if (_open != null) _open.Repaint();
-        }
+        internal static void RepaintIfOpen() { if (_open != null) _open.Repaint(); }
 
         private void OnEnable()  { _open = this; }
         private void OnDisable() { if (_open == this) _open = null; }
@@ -65,30 +61,45 @@ namespace VaroniaBackOffice.EditorTools
         {
             EnsureStyles();
             DrawHeader();
-
             GUILayout.Space(6);
+
+            bool busy = VaroniaPackageUpdateChecker.IsRunning || VaroniaPackageUpdateChecker.IsUpdating;
 
             // ── Barre d'actions ──
             EditorGUILayout.BeginHorizontal();
             GUILayout.Space(12);
-
-            using (new EditorGUI.DisabledScope(VaroniaPackageUpdateChecker.IsRunning))
+            using (new EditorGUI.DisabledScope(busy))
+            {
                 if (GUILayout.Button(VaroniaPackageUpdateChecker.IsRunning ? "Vérification…" : "Vérifier maintenant",
-                                     GUILayout.Height(26), GUILayout.Width(160)))
+                                     GUILayout.Height(26), GUILayout.Width(150)))
                     VaroniaPackageUpdateChecker.Check(openWindowWhenDone: false);
 
+                bool anyUpdate = false;
+                foreach (var s in VaroniaPackageUpdateChecker.Statuses)
+                    if (s.HasUpdate && !s.IsLocalFolder) { anyUpdate = true; break; }
+
+                using (new EditorGUI.DisabledScope(!anyUpdate))
+                    if (GUILayout.Button("Tout mettre à jour", GUILayout.Height(26), GUILayout.Width(150)))
+                        VaroniaPackageUpdateChecker.UpdateAll();
+            }
             GUILayout.FlexibleSpace();
 
             bool auto = VaroniaPackageUpdateChecker.AutoCheckEnabled;
             bool next = EditorGUILayout.ToggleLeft(
                 new GUIContent(" Vérifier automatiquement (1×/jour)",
-                    "Vérification silencieuse au démarrage de l'éditeur. La fenêtre ne s'ouvre que si une mise à jour existe."),
+                    "Vérification silencieuse au démarrage de l'éditeur. La fenêtre ne s'ouvre que s'il y a du neuf."),
                 auto, GUILayout.Width(230));
             if (next != auto) VaroniaPackageUpdateChecker.AutoCheckEnabled = next;
 
             GUILayout.Space(12);
             EditorGUILayout.EndHorizontal();
 
+            if (VaroniaPackageUpdateChecker.IsUpdating)
+            {
+                GUILayout.Space(4);
+                EditorGUILayout.HelpBox("Mise à jour en cours : " + (VaroniaPackageUpdateChecker.UpdatingName ?? "…") +
+                                        " — l'éditeur va recompiler.", MessageType.Info);
+            }
             GUILayout.Space(6);
 
             var list = VaroniaPackageUpdateChecker.Statuses;
@@ -110,60 +121,60 @@ namespace VaroniaBackOffice.EditorTools
                 GUILayout.Space(12);
                 Rect cardRect = EditorGUILayout.BeginVertical(_card);
 
-                // Barre d'accent : vert = à jour, orange = mise à jour dispo, bleu = en cours, violet = erreur
-                Color accent = st.HasUpdate ? ColOrange
+                // Barre d'accent : vert = à jour, orange = action requise, bleu = en cours, violet = erreur
+                Color accent = st.HasUpdate || st.NeedsPush ? ColOrange
                              : st.Error != null ? ColPurple
                              : st.Checked ? ColGreen : ColBlue;
-
                 if (Event.current.type == EventType.Repaint)
                     EditorGUI.DrawRect(new Rect(cardRect.x, cardRect.y, cardRect.width, 2f), accent);
 
-                // Ligne 1 : nom + versions
+                // Ligne 1 : nom + état
                 EditorGUILayout.BeginHorizontal();
-                GUILayout.Label(st.DisplayName, _title);
+                GUILayout.Label(st.DisplayName + (st.IsLocalFolder ? "   (dossier local)" : ""), _title);
                 GUILayout.FlexibleSpace();
 
-                if (st.HasUpdate)
-                {
-                    var up = new GUIStyle(_version) { normal = { textColor = ColOrange }, fontStyle = FontStyle.Bold };
-                    GUILayout.Label($"{st.LocalVersion}  →  {st.RemoteVersion}", up);
-                }
+                if (!st.Checked)
+                    GUILayout.Label(st.LocalVersion + "  ·  vérification…", _version);
                 else if (st.Error != null)
-                {
                     GUILayout.Label(st.LocalVersion, _version);
-                }
-                else if (st.Checked)
-                {
-                    var ok = new GUIStyle(_version) { normal = { textColor = ColGreen } };
-                    GUILayout.Label($"{st.LocalVersion}  ✓ à jour", ok);
-                }
+                else if (st.HasUpdate)
+                    GUILayout.Label(st.LocalVersion + "  ·  " + VaroniaPackageStatus.Short(st.LocalHash) + "  →  " + VaroniaPackageStatus.Short(st.RemoteHash),
+                        new GUIStyle(_version) { normal = { textColor = ColOrange }, fontStyle = FontStyle.Bold });
                 else
-                {
-                    GUILayout.Label($"{st.LocalVersion}  ·  vérification…", _version);
-                }
+                    GUILayout.Label(st.LocalVersion + "  ·  " + VaroniaPackageStatus.Short(st.LocalHash) + "  ✓ à jour",
+                        new GUIStyle(_version) { normal = { textColor = ColGreen } });
                 EditorGUILayout.EndHorizontal();
 
                 // Ligne 2 : détail
                 GUILayout.Space(2);
                 if (st.Error != null)
                     GUILayout.Label("⚠  " + st.Error, _desc);
+                else if (st.IsLocalFolder && st.NeedsPush)
+                    GUILayout.Label("⚠  Travail local non publié : " + st.AheadCount + " commit(s) non poussé(s), " + st.DirtyCount +
+                                    " fichier(s) modifié(s) non commité(s). Les autres projets ne le verront pas.", _desc);
+                else if (st.IsLocalFolder && st.HasUpdate)
+                    GUILayout.Label("Le dépôt distant a avancé : fais un git pull dans le dossier du package.", _desc);
                 else if (st.HasUpdate)
-                    GUILayout.Label($"Une version plus récente est publiée sur GitHub ({st.RepoName}).", _desc);
+                    GUILayout.Label("Un commit plus récent est publié. « Mettre à jour » relance la résolution UPM sur ce commit.", _desc);
                 else
                     GUILayout.Label(st.Name, _desc);
 
-                // Ligne 3 : lien dépôt
-                if (st.RepoUrl != null)
+                // Ligne 3 : actions
+                GUILayout.Space(4);
+                EditorGUILayout.BeginHorizontal();
+                if (st.HasUpdate && !st.IsLocalFolder)
                 {
-                    GUILayout.Space(4);
-                    EditorGUILayout.BeginHorizontal();
-                    if (GUILayout.Button("Ouvrir le dépôt", EditorStyles.miniButton, GUILayout.Width(110)))
-                        Application.OpenURL(st.RepoUrl);
-                    if (GUILayout.Button("Copier l'URL", EditorStyles.miniButton, GUILayout.Width(100)))
-                        EditorGUIUtility.systemCopyBuffer = st.RepoUrl + ".git";
-                    GUILayout.FlexibleSpace();
-                    EditorGUILayout.EndHorizontal();
+                    using (new EditorGUI.DisabledScope(busy))
+                        if (GUILayout.Button("Mettre à jour", EditorStyles.miniButton, GUILayout.Width(110)))
+                            VaroniaPackageUpdateChecker.Update(st);
                 }
+                if (st.RepoUrl != null && GUILayout.Button("Ouvrir le dépôt", EditorStyles.miniButton, GUILayout.Width(110)))
+                    Application.OpenURL(st.RepoUrl);
+                if (st.IsLocalFolder && !string.IsNullOrEmpty(st.LocalPath) &&
+                    GUILayout.Button("Ouvrir le dossier", EditorStyles.miniButton, GUILayout.Width(110)))
+                    EditorUtility.RevealInFinder(st.LocalPath);
+                GUILayout.FlexibleSpace();
+                EditorGUILayout.EndHorizontal();
 
                 EditorGUILayout.EndVertical();
                 GUILayout.Space(12);
@@ -173,8 +184,8 @@ namespace VaroniaBackOffice.EditorTools
             EditorGUILayout.EndScrollView();
 
             GUILayout.Space(6);
-            var footer = new GUIStyle(EditorStyles.centeredGreyMiniLabel) { wordWrap = true };
-            GUILayout.Label("Information uniquement — aucune mise à jour n'est installée automatiquement.", footer);
+            GUILayout.Label("Comparaison par commit via git ls-remote (dépôts privés OK). Après « Mettre à jour », pense à check-in manifest.json + packages-lock.json.",
+                new GUIStyle(EditorStyles.centeredGreyMiniLabel) { wordWrap = true });
             GUILayout.Space(6);
         }
 
@@ -195,7 +206,7 @@ namespace VaroniaBackOffice.EditorTools
             {
                 fontSize = 16, alignment = TextAnchor.MiddleCenter, normal = { textColor = Color.white }
             });
-            EditorGUILayout.LabelField("Versions locales et versions publiées sur GitHub",
+            EditorGUILayout.LabelField("Commit installé vs dépôt Git — mise à jour en un clic",
                 new GUIStyle(EditorStyles.centeredGreyMiniLabel) { fontSize = 10 });
 
             GUILayout.Space(8);
