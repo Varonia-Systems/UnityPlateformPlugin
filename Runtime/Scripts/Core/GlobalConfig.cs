@@ -32,6 +32,7 @@ namespace VaroniaBackOffice
 
         Unknown = -1,
         PICO_VSVR_Glock = 417,
+        PICO_VSVR_Benelli = 418,
         VORTEX_WEAPON_FOCUS = 501,
 
         HMD = 777,
