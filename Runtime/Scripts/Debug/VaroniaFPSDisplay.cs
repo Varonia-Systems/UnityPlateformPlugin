@@ -136,8 +136,7 @@ namespace VaroniaBackOffice
             yield return new WaitForSecondsRealtime(0.2f);
             if (BackOfficeVaronia.Instance != null)
             {
-                var mode = BackOfficeVaronia.Instance.config.DeviceMode;
-                Mini = (mode == DeviceMode.Server_Spectator || mode == DeviceMode.Client_Spectator);
+                Mini = BackOfficeVaronia.IsSpectator();
             }
         }
 

@@ -14,6 +14,11 @@ namespace VaroniaBackOffice
         const string k_PathKey = "VBO_OrthoSourcePath";
         static string OrthoSourcePath => EditorPrefs.GetString(k_PathKey);
 
+        // ── Réglages avancés persistés (retrouver le même cadrage d'une fois à l'autre) ──
+        const string k_OffXKey = "VBO_OrthoOffsetX";
+        const string k_OffYKey = "VBO_OrthoOffsetY";
+        const string k_NameKey = "VBO_OrthoViewName";
+
         // ── Modes ─────────────────────────────────────────────────────────────────
         enum OrthoMode { Start, Setup, Paint }
         OrthoMode _mode = OrthoMode.Start;
@@ -22,6 +27,16 @@ namespace VaroniaBackOffice
         float  _orthoSize    = 10f;
         float  _cameraHeight = 50f;
         Camera _tempCam;
+
+        // Décalage du cadrage, exprimé dans le repère de l'IMAGE (X = horizontal,
+        // Y = vertical), pas en X/Z monde : la caméra est tournée (Euler 90,0,-90),
+        // donc on l'applique le long de ses propres axes right/up.
+        float  _offsetX = 0f;
+        float  _offsetY = 0f;
+
+        // Section « Avancé » : repliée par défaut.
+        bool   _advancedOpen;
+        string _viewNameOverride = "";
 
         // ── Paint tools ───────────────────────────────────────────────────────────
         enum PaintTool { Brush, Line, Rect, Eraser }
@@ -84,7 +99,20 @@ namespace VaroniaBackOffice
             w.minSize = w.maxSize = new Vector2(480, 290);
         }
 
-        void OnEnable()          => _stylesBuilt = false;
+        void OnEnable()
+        {
+            _stylesBuilt = false;
+            _offsetX          = EditorPrefs.GetFloat(k_OffXKey, 0f);
+            _offsetY          = EditorPrefs.GetFloat(k_OffYKey, 0f);
+            _viewNameOverride = EditorPrefs.GetString(k_NameKey, "");
+        }
+
+        void SaveAdvancedPrefs()
+        {
+            EditorPrefs.SetFloat(k_OffXKey, _offsetX);
+            EditorPrefs.SetFloat(k_OffYKey, _offsetY);
+            EditorPrefs.SetString(k_NameKey, _viewNameOverride ?? "");
+        }
         void OnInspectorUpdate() => Repaint();
         void OnLostFocus()       => ResetCursor();
 
@@ -463,9 +491,13 @@ namespace VaroniaBackOffice
 
         // ─── Setup screen ─────────────────────────────────────────────────────────
 
+        // Hauteur de l'écran Setup : la fenêtre est à taille fixe, elle grandit quand
+        // la section « Avancé » est dépliée.
+        float SetupHeight() => _advancedOpen ? 560f : 320f;
+
         void DrawSetupScreen()
         {
-            ResizeTo(480, 320);
+            ResizeTo(480, SetupHeight());
 
             EditorGUILayout.Space(14);
             EditorGUILayout.BeginHorizontal();
@@ -493,6 +525,9 @@ namespace VaroniaBackOffice
                 EditorGUILayout.Space(4);
             }, colAccent);
 
+            EditorGUILayout.Space(8);
+            DrawAdvancedSection();
+
             EditorGUILayout.Space(10);
             EditorGUILayout.BeginHorizontal();
             GUILayout.Space(12);
@@ -513,6 +548,105 @@ namespace VaroniaBackOffice
             EditorGUILayout.EndHorizontal();
             EditorGUILayout.Space(8);
             GUILayout.Label("Varonia Back Office  ·  Ortho View", _footerStyle);
+        }
+
+        // ─── Section avancée (repliée par défaut) ─────────────────────────────────
+
+        bool HasAdvancedEdits() =>
+            !Mathf.Approximately(_offsetX, 0f) || !Mathf.Approximately(_offsetY, 0f)
+            || !string.IsNullOrEmpty((_viewNameOverride ?? "").Trim());
+
+        void DrawAdvancedSection()
+        {
+            // ── En-tête cliquable ──
+            EditorGUILayout.BeginHorizontal();
+            GUILayout.Space(12);
+            var foldStyle = new GUIStyle { fontSize=10, fontStyle=FontStyle.Bold,
+                alignment=TextAnchor.MiddleLeft,
+                normal={textColor=_advancedOpen ? colAccent : colTextMuted},
+                hover ={textColor=colTextPrimary},
+                padding=new RectOffset(4,4,4,4) };
+            if (GUILayout.Button(_advancedOpen ? "▾  AVANCÉ" : "▸  AVANCÉ",
+                                 foldStyle, GUILayout.Width(110), GUILayout.Height(20)))
+            {
+                _advancedOpen = !_advancedOpen;
+                ResizeTo(480, SetupHeight());
+            }
+            GUILayout.FlexibleSpace();
+            // Replié, on signale qu'un réglage non-défaut est actif (sinon il devient invisible).
+            if (!_advancedOpen && HasAdvancedEdits())
+                GUILayout.Label("● réglages actifs", new GUIStyle {
+                    fontSize=9, alignment=TextAnchor.MiddleRight,
+                    normal={textColor=colWarn}, padding=new RectOffset(0,0,6,0) },
+                    GUILayout.Width(110));
+            GUILayout.Space(12);
+            EditorGUILayout.EndHorizontal();
+
+            if (!_advancedOpen) return;
+
+            DrawCard(() =>
+            {
+                // ── Cadrage ──
+                DrawSectionLabel("CADRAGE  (mètres, repère image)");
+                EditorGUILayout.Space(4); DrawDivider(); EditorGUILayout.Space(10);
+
+                EditorGUI.BeginChangeCheck();
+                DrawOffsetRow("Offset X", ref _offsetX);
+                EditorGUILayout.Space(6);
+                DrawOffsetRow("Offset Y", ref _offsetY);
+                if (EditorGUI.EndChangeCheck()) { UpdateCamera(); SaveAdvancedPrefs(); }
+
+                EditorGUILayout.Space(8);
+                EditorGUILayout.BeginHorizontal();
+                GUILayout.Space(104);
+                using (new EditorGUI.DisabledScope(
+                           Mathf.Approximately(_offsetX, 0f) && Mathf.Approximately(_offsetY, 0f)))
+                {
+                    var resetStyle = new GUIStyle(_buttonStyle) { fontSize=10,
+                        padding=new RectOffset(8,8,4,4) };
+                    if (GUILayout.Button("⟲  Recentrer sur l'origine", resetStyle,
+                                         GUILayout.Height(22), GUILayout.Width(180)))
+                    {
+                        _offsetX = _offsetY = 0f;
+                        UpdateCamera(); SaveAdvancedPrefs();
+                    }
+                }
+                GUILayout.FlexibleSpace();
+                EditorGUILayout.EndHorizontal();
+
+                // ── Nom de la vue ──
+                EditorGUILayout.Space(10); DrawDivider(); EditorGUILayout.Space(10);
+                DrawSectionLabel("NOM DE LA VUE");
+                EditorGUILayout.Space(4);
+
+                EditorGUILayout.BeginHorizontal();
+                GUILayout.Label("Override", _sliderLabelStyle, GUILayout.Width(104));
+                EditorGUI.BeginChangeCheck();
+                _viewNameOverride = EditorGUILayout.TextField(_viewNameOverride ?? "");
+                if (EditorGUI.EndChangeCheck()) SaveAdvancedPrefs();
+                EditorGUILayout.EndHorizontal();
+
+                EditorGUILayout.BeginHorizontal();
+                GUILayout.Space(104);
+                string sceneName = SceneManager.GetActiveScene().name;
+                if (string.IsNullOrEmpty(sceneName)) sceneName = "UntitledScene";
+                GUILayout.Label(
+                    string.IsNullOrEmpty((_viewNameOverride ?? "").Trim())
+                        ? $"vide → nom de la scène « {sceneName} »"
+                        : "utilisé pour le filigrane et le nom du fichier",
+                    new GUIStyle(_tbLabelStyle) { wordWrap = true });
+                EditorGUILayout.EndHorizontal();
+            }, colTextMuted);
+        }
+
+        // Ligne d'offset : curseur large + champ numérique pour une valeur précise.
+        void DrawOffsetRow(string label, ref float value)
+        {
+            EditorGUILayout.BeginHorizontal();
+            GUILayout.Label(label, _sliderLabelStyle, GUILayout.Width(104));
+            value = GUILayout.HorizontalSlider(value, -100f, 100f);
+            value = EditorGUILayout.FloatField(value, GUILayout.Width(54));
+            EditorGUILayout.EndHorizontal();
         }
 
         // ─── Paint screen ─────────────────────────────────────────────────────────
@@ -829,8 +963,13 @@ namespace VaroniaBackOffice
             if (_tempCam==null) _tempCam=go.AddComponent<Camera>();
             _tempCam.orthographic     =true;
             _tempCam.orthographicSize =_orthoSize;
-            _tempCam.transform.position=new Vector3(0,_cameraHeight,0);
+            // Rotation AVANT la position : l'offset suit les axes de la caméra (right/up),
+            // horizontaux ici puisqu'elle regarde vers le bas. Un décalage en X/Z monde
+            // ne correspondrait pas aux axes de l'image (la caméra est roulée de -90°).
             _tempCam.transform.rotation=Quaternion.Euler(90,0,-90);
+            var camT=_tempCam.transform;
+            camT.position=new Vector3(0,_cameraHeight,0)
+                          + camT.right*_offsetX + camT.up*_offsetY;
             EditorApplication.ExecuteMenuItem("Window/General/Game");
             SceneView.RepaintAll();
         }
@@ -867,9 +1006,25 @@ namespace VaroniaBackOffice
 
         string BuildWatermarkText()
         {
-            string scene = SceneManager.GetActiveScene().name;
-            if (string.IsNullOrEmpty(scene)) scene = "UntitledScene";
-            return $"{scene}    ·    Zoom {Mathf.RoundToInt(_orthoSize)}    ·    {DateTime.Now:yyyy-MM-dd HH:mm}";
+            return $"{ViewName()}    ·    Zoom {Mathf.RoundToInt(_orthoSize)}    ·    {DateTime.Now:yyyy-MM-dd HH:mm}";
+        }
+
+        // Nom de la vue : override de la section « Avancé » si renseigné, sinon la scène.
+        string ViewName()
+        {
+            string n = (_viewNameOverride ?? "").Trim();
+            if (!string.IsNullOrEmpty(n)) return n;
+            n = SceneManager.GetActiveScene().name;
+            return string.IsNullOrEmpty(n) ? "UntitledScene" : n;
+        }
+
+        // Même nom, assaini pour servir de nom de fichier (l'override est saisi à la main).
+        string ViewFileName()
+        {
+            var sb = new System.Text.StringBuilder(ViewName());
+            foreach (char c in Path.GetInvalidFileNameChars()) sb.Replace(c, '_');
+            string s = sb.ToString().Trim();
+            return string.IsNullOrEmpty(s) ? "UntitledScene" : s;
         }
 
         // Bake un filigrane (plaque sombre + texte blanc) en bas à gauche, directement
@@ -959,9 +1114,7 @@ namespace VaroniaBackOffice
             if (_capturedTex==null) return;
             if (_texDirty){_capturedTex.Apply();_texDirty=false;}
             byte[] bytes=_capturedTex.EncodeToJPG(95);
-            string scene=SceneManager.GetActiveScene().name;
-            if (string.IsNullOrEmpty(scene)) scene="UntitledScene";
-            string fileName=$"{scene}_{_orthoSize:F0}.jpg";
+            string fileName=$"{ViewFileName()}_{_orthoSize:F0}.jpg";
             string dir=EditorPrefs.GetString(k_PathKey);
             bool usingOrthoSource = !string.IsNullOrEmpty(dir) && Directory.Exists(dir);
             if (!usingOrthoSource) dir=Application.dataPath;
@@ -995,9 +1148,7 @@ namespace VaroniaBackOffice
             if (_capturedTex==null) return;
             if (_texDirty){_capturedTex.Apply();_texDirty=false;}
 
-            string scene=SceneManager.GetActiveScene().name;
-            if (string.IsNullOrEmpty(scene)) scene="UntitledScene";
-            string defaultName=$"{scene}_{_orthoSize:F0}.jpg";
+            string defaultName=$"{ViewFileName()}_{_orthoSize:F0}.jpg";
 
             // Dossier par défaut : OrthoSourcePath si valide, sinon Assets/.
             string defaultDir=EditorPrefs.GetString(k_PathKey);
@@ -1021,7 +1172,7 @@ namespace VaroniaBackOffice
             _originalPixels=null; _undoHistory.Clear();
             _shapeDragging=_brushStroking=_texDirty=false;
             ResetCursor();
-            GoWindowed(480, 320);
+            GoWindowed(480, SetupHeight());
             _mode=OrthoMode.Setup;
             UpdateCamera();
         }

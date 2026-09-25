@@ -320,9 +320,31 @@ namespace VaroniaBackOffice
             return true;
         }
 
+        /// <summary>
+        /// True si ce poste est un spectateur (serveur ou client). Un spectateur n'a ni arme ni
+        /// contrôleur : les avertissements qui les concernent sont du bruit à l'écran pour lui.
+        /// Lu en direct pour qu'un changement de DeviceMode au runtime soit pris en compte.
+        /// </summary>
+        public static bool IsSpectator()
+        {
+            var inst = Instance;
+            if (inst == null || inst.config == null) return false;
+            var m = inst.config.DeviceMode;
+            return m == DeviceMode.Server_Spectator || m == DeviceMode.Client_Spectator;
+        }
+
         private void OnGUI()
         {
-            if (!_showFdpDebug && !_showControllerWarning && !_showLegacyMigration && _runtimeErrors.Count == 0) return;
+            // Spectateur : on masque les erreurs runtime et tout ce qui concerne les contrôleurs.
+            // La bannière FDP reste affichée : ce n'est pas une erreur, et savoir qu'un override
+            // de config est chargé reste utile sur un poste spectateur.
+            bool spectator = IsSpectator();
+
+            bool showLegacy     = _showLegacyMigration   && !spectator;
+            bool showController = _showControllerWarning && !spectator;
+            bool showErrors     = _runtimeErrors.Count > 0 && !spectator;
+
+            if (!_showFdpDebug && !showLegacy && !showController && !showErrors) return;
 
             float y = 50f;
 
@@ -333,66 +355,83 @@ namespace VaroniaBackOffice
                     $"Closing in {_fdpDebugTimer:F1}s...",
                     new Color(1f, 0.60f, 0.10f, 1f)); // orange
 
-            if (_showLegacyMigration)
+            if (showLegacy)
                 DrawBanner(ref y,
                     "♻  COMPATIBILITÉ LEGACY CONTROLLER",
                     _legacyMigrationMsg,
                     "Mets à jour ton GlobalConfig.json (Devices) pour retirer l'ancien format.",
                     new Color(0.35f, 0.62f, 1f, 1f)); // bleu = info
 
-            if (_showControllerWarning)
+            if (showController)
                 DrawBanner(ref y,
                     "⛔  CONTROLLER ID NOT FOUND",
                     _controllerWarningMsg,
                     "Vérifie le champ Controller (enum) de l'arme dans GlobalConfig.",
                     new Color(1f, 0.30f, 0.30f, 1f)); // rouge
 
-            for (int i = 0; i < _runtimeErrors.Count; i++)
-                DrawBanner(ref y,
-                    "⛔  ERREUR",
-                    _runtimeErrors[i],
-                    null,
-                    new Color(1f, 0.30f, 0.30f, 1f)); // rouge
+            if (showErrors)
+                for (int i = 0; i < _runtimeErrors.Count; i++)
+                    DrawBanner(ref y,
+                        "⛔  ERREUR",
+                        _runtimeErrors[i],
+                        null,
+                        new Color(1f, 0.30f, 0.30f, 1f)); // rouge
+        }
+
+        // Styles et texture de bannière mis en cache. DrawBanner est appelé à CHAQUE frame tant
+        // qu'une bannière est visible : la version précédente allouait une Texture2D (jamais
+        // libérée → fuite mémoire) et trois GUIStyle à chaque appel et pour chaque bannière.
+        private static Texture2D _bannerTex;
+        private static GUIStyle  _bannerBgStyle, _bannerTitleStyle, _bannerPathStyle;
+
+        private static void EnsureBannerStyles()
+        {
+            // GUI.skin n'est valide que pendant OnGUI : cette méthode n'est appelée que depuis DrawBanner.
+            if (_bannerTex != null && _bannerBgStyle != null) return;
+
+            _bannerTex = new Texture2D(1, 1);
+            _bannerTex.SetPixel(0, 0, new Color(0.11f, 0.11f, 0.14f, 0.92f));
+            _bannerTex.Apply();
+            _bannerTex.hideFlags = HideFlags.HideAndDontSave;
+
+            _bannerBgStyle = new GUIStyle(GUI.skin.box);
+            _bannerBgStyle.normal.background = _bannerTex;
+
+            _bannerTitleStyle = new GUIStyle(GUI.skin.label)
+            {
+                alignment = TextAnchor.MiddleCenter,
+                fontSize  = 16,
+                fontStyle = FontStyle.Bold,
+                wordWrap  = true,
+            };
+
+            _bannerPathStyle = new GUIStyle(GUI.skin.label)
+            {
+                alignment = TextAnchor.MiddleCenter,
+                fontSize  = 12,
+                wordWrap  = true,
+                normal    = { textColor = new Color(0.92f, 0.92f, 0.95f, 1f) },
+            };
         }
 
         /// <summary>Dessine une bannière d'alerte centrée en haut, et avance <paramref name="y"/> pour empiler.</summary>
         private void DrawBanner(ref float y, string title, string line1, string line2, Color titleColor)
         {
-            Color colBg    = new Color(0.11f, 0.11f, 0.14f, 0.92f);
-            Color colValue = new Color(0.92f, 0.92f, 0.95f, 1f);
+            EnsureBannerStyles();
 
             float width  = 560f;
             float height = 80f;
             float x = (Screen.width - width) / 2f;
 
-            GUIStyle bgStyle = new GUIStyle(GUI.skin.box);
-            Texture2D bgTex = new Texture2D(1, 1);
-            bgTex.SetPixel(0, 0, colBg);
-            bgTex.Apply();
-            bgStyle.normal.background = bgTex;
+            // Seule la couleur du titre change d'une bannière à l'autre : on la pose sur le style
+            // partagé juste avant le Label (IMGUI dessine immédiatement, donc pas d'effet de bord).
+            _bannerTitleStyle.normal.textColor = titleColor;
 
-            GUIStyle labelStyle = new GUIStyle(GUI.skin.label)
-            {
-                alignment = TextAnchor.MiddleCenter,
-                fontSize = 16,
-                fontStyle = FontStyle.Bold,
-                wordWrap = true,
-            };
-            labelStyle.normal.textColor = titleColor;
-
-            GUIStyle pathStyle = new GUIStyle(GUI.skin.label)
-            {
-                alignment = TextAnchor.MiddleCenter,
-                fontSize = 12,
-                wordWrap = true,
-            };
-            pathStyle.normal.textColor = colValue;
-
-            GUILayout.BeginArea(new Rect(x, y, width, height), bgStyle);
+            GUILayout.BeginArea(new Rect(x, y, width, height), _bannerBgStyle);
             GUILayout.FlexibleSpace();
-            GUILayout.Label(title, labelStyle);
-            if (!string.IsNullOrEmpty(line1)) GUILayout.Label(line1, pathStyle);
-            if (!string.IsNullOrEmpty(line2)) GUILayout.Label(line2, pathStyle);
+            GUILayout.Label(title, _bannerTitleStyle);
+            if (!string.IsNullOrEmpty(line1)) GUILayout.Label(line1, _bannerPathStyle);
+            if (!string.IsNullOrEmpty(line2)) GUILayout.Label(line2, _bannerPathStyle);
             GUILayout.FlexibleSpace();
             GUILayout.EndArea();
 

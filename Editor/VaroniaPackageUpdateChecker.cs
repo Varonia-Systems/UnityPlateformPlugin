@@ -333,12 +333,26 @@ namespace VaroniaBackOffice.EditorTools
 
             using (var p = Process.Start(psi))
             {
-                string o = p.StandardOutput.ReadToEnd();
-                string e = p.StandardError.ReadToEnd();
-                if (!p.WaitForExit(20000)) { try { p.Kill(); } catch { } return (-1, o, "timeout git"); }
-                return (p.ExitCode, o, e);
+                // DEADLOCK CLASSIQUE ÉVITÉ : lire stdout puis stderr séquentiellement bloque si git
+                // remplit le tampon stderr (~4 Ko) avant de fermer stdout — chacun attend l'autre, et
+                // le timeout placé après les lectures ne se déclenchait jamais. stderr est donc lu
+                // en parallèle, et le timeout borne réellement l'attente.
+                var errTask = p.StandardError.ReadToEndAsync();
+                var outTask = p.StandardOutput.ReadToEndAsync();
+
+                if (!p.WaitForExit(20000))
+                {
+                    try { p.Kill(); } catch { }
+                    return (-1, SafeResult(outTask), "timeout git (20 s) : " + SafeResult(errTask));
+                }
+                // WaitForExit(int) ne garantit pas la fin des flux asynchrones : on les attend explicitement.
+                Task.WaitAll(new Task[] { outTask, errTask }, 5000);
+                return (p.ExitCode, SafeResult(outTask), SafeResult(errTask));
             }
         }
+
+        private static string SafeResult(Task<string> t)
+            => t.IsCompleted && !t.IsFaulted ? t.Result : "";
 
         private static string Truncate(string s, int n)
             => string.IsNullOrEmpty(s) ? "" : (s.Length <= n ? s.Trim() : s.Substring(0, n).Trim() + "…");

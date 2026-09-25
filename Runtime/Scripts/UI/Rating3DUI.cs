@@ -653,60 +653,27 @@ namespace VBO_Ultimate.Runtime.Scripts.UI
                 }
             }
 
-            // Interaction clic avec maintien.
-            // L'overload sans index cible VaroniaWeaponRegistry.DefaultIndex : l'index runtime est
-            // attribué dynamiquement par le registry et n'est PAS forcément le slot 0. En dur, le
-            // rating écoutait la gâchette d'une autre arme que celle du joueur en multi-arme.
-            if (hoveredRating > 0 && VaroniaInput.GetButton(VaroniaButton.Primary))
+            // Validation au TIR : un seul appui suffit, plus besoin de maintenir.
+            // GetButtonDown = front montant uniquement, donc une gâchette déjà enfoncée à
+            // l'ouverture du panneau ne valide rien tant qu'elle n'a pas été relâchée puis
+            // pressée à nouveau. L'overload sans index cible VaroniaWeaponRegistry.DefaultIndex :
+            // l'index runtime est attribué dynamiquement et n'est PAS forcément le slot 0.
+            if (hoveredRating > 0 && VaroniaInput.GetButtonDown(VaroniaButton.Primary))
             {
-                if (_lastInteractingStar == hoveredRating)
-                {
-                    float prevTimer = _currentHoldTimer;
-                    _currentHoldTimer += Time.deltaTime;
-                    
-                    // Gestion du son de chargement progressif
-                    if (chargeSound != null && _chargeAudioSource != null)
-                    {
-                        if (!_chargeAudioSource.isPlaying)
-                        {
-                            _chargeAudioSource.clip = chargeSound;
-                            _chargeAudioSource.Play();
-                        }
-
-                        float progress = Mathf.Clamp01(_currentHoldTimer / selectionHoldTime);
-                        _chargeAudioSource.volume = chargeVolume * progress; // Monte avec le temps
-                        _chargeAudioSource.pitch = Mathf.Lerp(chargePitchStart, chargePitchEnd, progress);
-                    }
-
-                    if (_currentHoldTimer >= selectionHoldTime)
-                    {
-                        StopChargeSound();
-                        SetRating(hoveredRating);
-                        _currentHoldTimer = 0f; // Reset après validation
-                    }
-                }
-                else
-                {
-                    StopChargeSound();
-                    if (_currentHoldTimer > 0) PlaySound(cancelSound, cancelVolume);
-                    _lastInteractingStar = hoveredRating;
-                    _currentHoldTimer = 0f;
-                    PlaySound(hoverSound, hoverVolume);
-                }
+                _lastInteractingStar = hoveredRating;
+                SetRating(hoveredRating);
             }
-            else
+            else if (hoveredRating != _lastInteractingStar)
             {
-                StopChargeSound();
-                if (_currentHoldTimer > 0) PlaySound(cancelSound, cancelVolume);
-                
-                if (hoveredRating != _lastInteractingStar)
-                {
-                    if (hoveredRating > 0) PlaySound(hoverSound, hoverVolume);
-                    _lastInteractingStar = hoveredRating;
-                }
-                
-                _currentHoldTimer = 0f;
+                // Son de survol quand l'étoile visée change.
+                if (hoveredRating > 0) PlaySound(hoverSound, hoverVolume);
+                _lastInteractingStar = hoveredRating;
             }
+
+            // Plus aucune charge en mode arme : le timer et le son de charge ne servent
+            // qu'au mode regard, qui gère les siens dans HandleGazeInteraction.
+            StopChargeSound();
+            _currentHoldTimer = 0f;
         }
 
         /// <summary>

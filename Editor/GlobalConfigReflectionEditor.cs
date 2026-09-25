@@ -458,11 +458,14 @@ namespace VaroniaBackOffice
             { "HideMode",   "Internal display mode flag. Leave at 0 unless instructed." },
             { "Direct",     "Optional fast-path used after a crash or resync — skips some steps (depending on the game) to rejoin faster." },
 
+            // Spatial
+            { "DontUseSpatialSync", "Disables the whole spatial system: VaroniaSync does nothing on the camera rig (no SyncPos / SyncQuaterion, no boundary), VaroniaPosMul applies no coef mul (Multiplier), and a boundary placed manually in the scene does not build either." },
+
             // Devices (multi-arme)
             { "Devices", "Per-weapon binding list. Index in this list = weaponIndex used by VaroniaInput / VaroniaWeaponTracking." },
 
             // VR
-            { "HeadsetName", "Manual override for detected VR headset name (e.g. 'Pico 4 Ultra', 'Vive Focus 3'). Leave empty to auto-detect via OpenVR / OpenXR. Drives debug latency chart selection." },
+            { "HeadsetName", "Manual override for detected VR headset name (e.g. 'Pico 4 Ultra', 'Vive Focus 3'). Leave empty to auto-detect via OpenVR / OpenXR. Drives debug latency chart selection. A name containing 'pulsar' selects neither the VSVR nor the VBS chart." },
         };
 
         private static string GetTooltip(string fieldName) =>

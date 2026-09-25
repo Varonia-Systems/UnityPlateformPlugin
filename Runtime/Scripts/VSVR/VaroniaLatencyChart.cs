@@ -807,10 +807,8 @@ namespace VaroniaBackOffice
         {
             if (BackOfficeVaronia.Instance != null)
             {
-                var mode = BackOfficeVaronia.Instance.config.DeviceMode;
-                bool isSpectator = mode == DeviceMode.Server_Spectator || mode == DeviceMode.Client_Spectator;
                 // Pas de chart en mode spectateur.
-                show = !isSpectator && BackOfficeVaronia.Instance.config.HideMode == 0;
+                show = !BackOfficeVaronia.IsSpectator() && BackOfficeVaronia.Instance.config.HideMode == 0;
             }
 #if VBO_UITOOLKIT_OVERLAYS
             // Important : l'Update UITK ne tourne que si show==true, donc il ne peut pas

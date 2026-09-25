@@ -327,17 +327,33 @@ namespace VaroniaBackOffice
 
         // ── Texture helpers ──────────────────────────────────────────────────────
 
+        // Appelés DEPUIS le rendu (OnGUI) : sans cache, chaque repaint allouait de nouvelles
+        // Texture2D en HideAndDontSave, jamais libérées. On mémoïse par paramètres.
+        struct TexKey : IEquatable<TexKey>
+        {
+            public int W, H, R; public Color C;
+            public bool Equals(TexKey o) => W == o.W && H == o.H && R == o.R && C == o.C;
+            public override bool Equals(object o) => o is TexKey k && Equals(k);
+            public override int GetHashCode() => ((W * 397 ^ H) * 397 ^ R) * 397 ^ C.GetHashCode();
+        }
+        static readonly Dictionary<TexKey, Texture2D> _texCache = new Dictionary<TexKey, Texture2D>();
+
         static Texture2D MakeTex(Color col)
         {
+            var key = new TexKey { W = 1, H = 1, R = -1, C = col };
+            if (_texCache.TryGetValue(key, out var cached) && cached != null) return cached;
             var t = new Texture2D(1, 1, TextureFormat.RGBA32, false);
             t.SetPixel(0, 0, col);
             t.Apply();
             t.hideFlags = HideFlags.HideAndDontSave;
+            _texCache[key] = t;
             return t;
         }
 
         static Texture2D MakeRoundedTex(int w, int h, Color col, int radius)
         {
+            var key = new TexKey { W = w, H = h, R = radius, C = col };
+            if (_texCache.TryGetValue(key, out var cached) && cached != null) return cached;
             var t = new Texture2D(w, h, TextureFormat.RGBA32, false);
             Color clear = new Color(0, 0, 0, 0);
             for (int y = 0; y < h; y++)
@@ -356,7 +372,17 @@ namespace VaroniaBackOffice
                 }
             t.Apply();
             t.hideFlags = HideFlags.HideAndDontSave;
+            _texCache[key] = t;
             return t;
+        }
+
+        /// <summary>Point de sortie unique des étapes async du pipeline : trace l'erreur, libère
+        /// la barre de progression et affiche l'échec dans la fenêtre de build au lieu de la figer.</summary>
+        static void OnPipelineFault(string step, Exception e)
+        {
+            EditorUtility.ClearProgressBar();
+            UnityEngine.Debug.LogError($"[VaroniaBuild] Étape '{step}' échouée : {e}");
+            try { Buildwindows.SetState("ERREUR", $"{step} : {e.Message}", 1f); } catch { /* fenêtre absente */ }
         }
 
         // ── Style builder ─────────────────────────────────────────────────────────
@@ -1230,7 +1256,16 @@ namespace VaroniaBackOffice
             }
         }
 
+        // Un 'async void' n'a personne pour observer ses exceptions : une erreur arrêtait le
+        // pipeline net, sans message, fenêtre de progression figée. Le corps est isolé dans
+        // EndBuildCore et toute exception remonte ici vers OnPipelineFault.
         public static async void EndBuild(bool success)
+        {
+            try { await EndBuildCore(success); }
+            catch (Exception e) { OnPipelineFault("EndBuild", e); }
+        }
+
+        public static async Task EndBuildCore(bool success)
         {
             if (_endBuildCalled) return;
             _endBuildCalled = true;
@@ -1442,7 +1477,16 @@ namespace VaroniaBackOffice
                        .ToArray();
         }
 
+        // Un 'async void' n'a personne pour observer ses exceptions : une erreur arrêtait le
+        // pipeline net, sans message, fenêtre de progression figée. Le corps est isolé dans
+        // CopyCore et toute exception remonte ici vers OnPipelineFault.
         async void Copy(string GameId)
+        {
+            try { await CopyCore(GameId); }
+            catch (Exception e) { OnPipelineFault("Copy", e); }
+        }
+
+        async Task CopyCore(string GameId)
         {
             PipelineTimings.CopyTimer.Restart();
 
@@ -1513,7 +1557,16 @@ namespace VaroniaBackOffice
             ShowSuccessReport();
         }
 
+        // Un 'async void' n'a personne pour observer ses exceptions : une erreur arrêtait le
+        // pipeline net, sans message, fenêtre de progression figée. Le corps est isolé dans
+        // ZipCore et toute exception remonte ici vers OnPipelineFault.
         async void Zip(string GameId)
+        {
+            try { await ZipCore(GameId); }
+            catch (Exception e) { OnPipelineFault("Zip", e); }
+        }
+
+        async Task ZipCore(string GameId)
         {
             PipelineTimings.ZipTimer.Restart();
 
@@ -1773,7 +1826,16 @@ namespace VaroniaBackOffice
             InstallApkOnDevices(apk, devices);
         }
 
+        // Un 'async void' n'a personne pour observer ses exceptions : une erreur arrêtait le
+        // pipeline net, sans message, fenêtre de progression figée. Le corps est isolé dans
+        // InstallApkOnDevicesCore et toute exception remonte ici vers OnPipelineFault.
         static async void InstallApkOnDevices(string apk, List<AdbDevice> targets)
+        {
+            try { await InstallApkOnDevicesCore(apk, targets); }
+            catch (Exception e) { OnPipelineFault("InstallApkOnDevices", e); }
+        }
+
+        static async Task InstallApkOnDevicesCore(string apk, List<AdbDevice> targets)
         {
             Buildwindows.SetState("INSTALL", "Installation de l'APK…", 0f, indeterminate: true);
             Buildwindows.ShowWindow();

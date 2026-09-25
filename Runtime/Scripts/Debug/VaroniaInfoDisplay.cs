@@ -66,7 +66,7 @@ namespace VaroniaBackOffice
             yield return new WaitForSeconds(0.1f);
             BackOfficeVaronia.RaiseMovieChanged();
             yield return new WaitForSeconds(1f);
-            _headsetName = GlobalConfig.ResolveHeadsetName();
+            _headsetName = GlobalConfig.ResolveHeadsetDisplayName();
 
 #if VBO_UITOOLKIT_OVERLAYS
             // Le headset arrive tardivement → push une fois ici
@@ -109,9 +109,7 @@ namespace VaroniaBackOffice
         {
             if (BackOfficeVaronia.Instance != null)
             {
-                var mode = BackOfficeVaronia.Instance.config.DeviceMode;
-                bool isSpectator = mode == DeviceMode.Server_Spectator || mode == DeviceMode.Client_Spectator;
-                show = !isSpectator && BackOfficeVaronia.Instance.config.HideMode == 0;
+                show = !BackOfficeVaronia.IsSpectator() && BackOfficeVaronia.Instance.config.HideMode == 0;
             }
 #if VBO_UITOOLKIT_OVERLAYS
             if (_panel != null)

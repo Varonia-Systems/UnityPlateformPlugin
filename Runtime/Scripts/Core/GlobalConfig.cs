@@ -113,8 +113,9 @@ namespace VaroniaBackOffice
         [Header("Spatial")]
         /// <summary>
         /// Si true, tout le système spatial est neutralisé : VaroniaSync n'applique pas
-        /// SyncPos / SyncQuaterion et n'instancie aucune boundary, et une boundary posée
-        /// manuellement dans la scène ne construit rien.
+        /// SyncPos / SyncQuaterion et n'instancie aucune boundary, VaroniaPosMul n'applique
+        /// pas le coef mul (Multiplier), et une boundary posée manuellement dans la scène
+        /// ne construit rien.
         /// Par défaut false = fonctionnement normal.
         /// </summary>
         public bool DontUseSpatialSync = false;
@@ -188,7 +189,8 @@ namespace VaroniaBackOffice
         /// When empty, the name is auto-detected via OpenVR (<c>Prop_ModelNumber_String</c>)
         /// or OpenXR (<c>InputDevices</c>). When set, it overrides detection AND drives
         /// which debug latency chart is shown ("Pico 4 Ultra" → VSVR/ALVR chart,
-        /// "Vive Focus 3" → VBS chart).
+        /// "Vive Focus 3" → VBS chart). A name containing "pulsar" (or a SteamVR driver
+        /// named "pulsar*") disables both charts, see <see cref="IsPulsarStreamer"/>.
         /// </summary>
         public string HeadsetName = "";
 
@@ -258,16 +260,78 @@ namespace VaroniaBackOffice
             return raw;
         }
 
-        /// <summary>True if the resolved headset is a Pico 4 Ultra (VSVR / ALVR streaming).</summary>
+        /// <summary>
+        /// Name of the SteamVR driver that owns the HMD (<c>Prop_TrackingSystemName_String</c>),
+        /// e.g. "pulsar_alvr", "pico", "vive_business_streaming". Empty when SteamVR is not
+        /// available (no HMD, OpenXR-only runtime, STEAMVR_ENABLED not defined).
+        /// </summary>
+        public static string ResolveDriverName()
+        {
+#if STEAMVR_ENABLED
+            try
+            {
+                // Même garde-fou que AutoDetectHeadsetName : pas d'appel OpenVR sans HMD présent.
+                if (!OpenVR.IsHmdPresent()) return "";
+
+                var vr = SteamVRBridge.GetSystem();
+                if (vr != null)
+                {
+                    var sb  = new System.Text.StringBuilder(256);
+                    var err = ETrackedPropertyError.TrackedProp_Success;
+                    vr.GetStringTrackedDeviceProperty(
+                        0, ETrackedDeviceProperty.Prop_TrackingSystemName_String, sb, 256, ref err);
+                    return sb.ToString().Trim();
+                }
+            }
+            catch { }
+#endif
+            return "";
+        }
+
+        /// <summary>
+        /// True if the HMD is streamed by the Varonia "Pulsar" driver. Detected when the headset
+        /// name OR the SteamVR driver name contains "pulsar" (case-insensitive).
+        /// A Pulsar-streamed headset is neither VSVR/ALVR nor VBS, whatever its model
+        /// (e.g. a Pico 4 Ultra under Pulsar must NOT select the VSVR latency chart).
+        /// </summary>
+        public static bool IsPulsarStreamer()
+        {
+            return ContainsPulsar(ResolveHeadsetName()) || ContainsPulsar(ResolveDriverName());
+        }
+
+        private static bool ContainsPulsar(string s) =>
+            !string.IsNullOrEmpty(s) && s.IndexOf("pulsar", System.StringComparison.OrdinalIgnoreCase) >= 0;
+
+        /// <summary>
+        /// Headset name for display in the debug HUD. Identical to <see cref="ResolveHeadsetName"/>,
+        /// except that a Pulsar prefix ("Pulsar-Pico 4 Ultra") is stripped: everything up to and
+        /// including the first '-' that follows "pulsar" is removed → "Pico 4 Ultra".
+        /// </summary>
+        public static string ResolveHeadsetDisplayName() => StripPulsarPrefix(ResolveHeadsetName());
+
+        internal static string StripPulsarPrefix(string name)
+        {
+            if (string.IsNullOrEmpty(name)) return name;
+            int p = name.IndexOf("pulsar", System.StringComparison.OrdinalIgnoreCase);
+            if (p < 0) return name;
+            int dash = name.IndexOf('-', p);
+            if (dash < 0) return name;
+            string rest = name.Substring(dash + 1).Trim();
+            return rest.Length > 0 ? rest : name;
+        }
+
+        /// <summary>True if the resolved headset is a Pico 4 Ultra streamed by VSVR / ALVR (never under Pulsar).</summary>
         public static bool IsPico4Ultra()
         {
+            if (IsPulsarStreamer()) return false;
             string n = ResolveHeadsetName();
             return n == "Pico 4 Ultra" || n == "Miramar" || n == "Oculus Quest2";
         }
 
-        /// <summary>True if the resolved headset is a Vive Focus 3 (VBS streaming).</summary>
+        /// <summary>True if the resolved headset is a Vive Focus 3 streamed by VBS (never under Pulsar).</summary>
         public static bool IsViveFocus3()
         {
+            if (IsPulsarStreamer()) return false;
             string n = ResolveHeadsetName();
             return n == "Vive Focus 3" || n == "Vive VBStreaming Focus3";
         }

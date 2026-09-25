@@ -92,7 +92,8 @@ namespace VaroniaBackOffice
             }
 
             // ── Reset position/rotation via T ──
-            if (IsKeyDown(TKey()))
+            // Ignoré si le spatial est désactivé (DontUseSpatialSync).
+            if (IsKeyDown(TKey()) && !GlobalConfig.SpatialSyncDisabled)
             {
                 var spatial = BackOfficeVaronia.Spatial;
                 if (spatial != null)

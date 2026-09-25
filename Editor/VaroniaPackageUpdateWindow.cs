@@ -80,7 +80,22 @@ namespace VaroniaBackOffice.EditorTools
 
                 using (new EditorGUI.DisabledScope(!anyUpdate))
                     if (GUILayout.Button("Tout mettre à jour", GUILayout.Height(26), GUILayout.Width(150)))
-                        VaroniaPackageUpdateChecker.UpdateAll();
+                    {
+                        int n = 0;
+                        foreach (var s in VaroniaPackageUpdateChecker.Statuses)
+                            if (s.HasUpdate && !s.IsLocalFolder) n++;
+
+                        // Même garde que le bouton unitaire, d'autant plus nécessaire ici que TOUS les
+                        // packages sont réinstallés en chaîne (plusieurs recompilations successives).
+                        bool ok = EditorUtility.DisplayDialog(
+                            "Mettre à jour " + n + " package(s) ?",
+                            "Tous les packages Varonia ayant un commit plus récent vont être réinstallés depuis Git, "
+                            + "l'un après l'autre.\n\n"
+                            + "Cela modifie Packages/manifest.json et déclenche une recompilation à chaque package.\n"
+                            + "Assure-toi que le projet est commité avant de continuer.",
+                            "Tout mettre à jour", "Annuler");
+                        if (ok) VaroniaPackageUpdateChecker.UpdateAll();
+                    }
             }
             GUILayout.FlexibleSpace();
 
@@ -166,7 +181,19 @@ namespace VaroniaBackOffice.EditorTools
                 {
                     using (new EditorGUI.DisabledScope(busy))
                         if (GUILayout.Button("Mettre à jour", EditorStyles.miniButton, GUILayout.Width(110)))
-                            VaroniaPackageUpdateChecker.Update(st);
+                        {
+                            // Action irréversible à un clic (réécrit manifest.json + résolution UPM) sur un
+                            // outil conçu pour être informatif : on confirme explicitement avant d'agir.
+                            bool ok = EditorUtility.DisplayDialog(
+                                "Mettre à jour " + st.DisplayName + " ?",
+                                "Le package va être réinstallé depuis Git sur le commit distant "
+                                + VaroniaPackageStatus.Short(st.RemoteHash) + "\n"
+                                + "(actuellement " + VaroniaPackageStatus.Short(st.LocalHash) + ").\n\n"
+                                + "Cela modifie Packages/manifest.json et relance la résolution UPM.\n"
+                                + "Assure-toi que le projet est commité avant de continuer.",
+                                "Mettre à jour", "Annuler");
+                            if (ok) VaroniaPackageUpdateChecker.Update(st);
+                        }
                 }
                 if (st.RepoUrl != null && GUILayout.Button("Ouvrir le dépôt", EditorStyles.miniButton, GUILayout.Width(110)))
                     Application.OpenURL(st.RepoUrl);
