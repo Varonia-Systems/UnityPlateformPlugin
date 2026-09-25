@@ -361,7 +361,7 @@ namespace VaroniaBackOffice
 
             // ── Warning contenu manquant ──
             bool contentMissing = !string.IsNullOrEmpty(_contentSourcePath)
-                                  && !Directory.Exists(Path.Combine(_contentSourcePath, Application.productName));
+                                  && NetworkPathProbe.DirectoryMissing(Path.Combine(_contentSourcePath, Application.productName)); // NAS : jamais sur le fil principal
             if (contentMissing)
             {
                 EditorGUILayout.Space(8);

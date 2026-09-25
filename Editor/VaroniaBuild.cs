@@ -499,7 +499,8 @@ namespace VaroniaBackOffice
             bool has7Zip      = !string.IsNullOrEmpty(EditorPrefs.GetString("VBO_7ZipPath"));
             bool hasBuildPath = !string.IsNullOrEmpty(EditorPrefs.GetString("VBO_BuildPath"));
             bool hasServer    = !string.IsNullOrEmpty(EditorPrefs.GetString("VBO_BuildServerPath"));
-            bool hasContent   =  Directory.Exists(EditorPrefs.GetString("VBO_ContentSourcePath") + "/" + Application.productName);
+            // Source de content sur le NAS : testé en tâche de fond (OnGUI tourne 10 fois/s, un partage lent figeait l'éditeur)
+            bool hasContent   =  NetworkPathProbe.DirectoryExists(EditorPrefs.GetString("VBO_ContentSourcePath") + "/" + Application.productName);
             bool canBuild     = hasGameId && hasBuildPath;
 
             EditorGUILayout.Space(12);
@@ -936,7 +937,7 @@ namespace VaroniaBackOffice
 
                 GUILayout.Space(4);
 
-                bool apkExists = File.Exists(ApkPath());
+                bool apkExists = NetworkPathProbe.FileExists(ApkPath()); // dossier de build, parfois sur le réseau
                 using (new EditorGUI.DisabledScope(!apkExists))
                 {
                     if (GUILayout.Button(new GUIContent(apkExists ? "📲  INSTALL (dernier APK)" : "📲  INSTALL (aucun APK)",
@@ -1732,12 +1733,22 @@ namespace VaroniaBackOffice
                 string outputExt = isAndroid ? ".apk" : ".exe";
                 BuildTarget targetForBuild = isAndroid ? BuildTarget.Android : BuildTarget.StandaloneWindows64;
 
-                var report = BuildPipeline.BuildPlayer(
-                    levels.ToArray(),
-                    EditorPrefs.GetString("VBO_BuildPath") + "/" + Application.productName + "/" + Application.productName + outputExt,
-                    targetForBuild,
-                    BuildOptions.None
-                );
+                // la barre de progression d'Unity doit rester visible pendant le build (voir YieldToUnityProgress)
+                Buildwindows.YieldToUnityProgress();
+                BuildReport report;
+                try
+                {
+                    report = BuildPipeline.BuildPlayer(
+                        levels.ToArray(),
+                        EditorPrefs.GetString("VBO_BuildPath") + "/" + Application.productName + "/" + Application.productName + outputExt,
+                        targetForBuild,
+                        BuildOptions.None
+                    );
+                }
+                finally
+                {
+                    Buildwindows.EndYieldToUnityProgress();
+                }
 
                 if (report.summary.result == BuildResult.Failed && !_endBuildCalled)
                 {
@@ -1954,6 +1965,7 @@ namespace VaroniaBackOffice
         const uint SWP_NOMOVE = 0x0002, SWP_NOSIZE = 0x0001, SWP_NOACTIVATE = 0x0010;
 
         bool _topmost;
+        static bool s_yieldToUnity;
 
         static readonly Color colBg          = new Color(0.11f, 0.11f, 0.14f, 1f);
         static readonly Color colAccent      = new Color(0.30f, 0.85f, 0.65f, 1f);
@@ -1985,12 +1997,42 @@ namespace VaroniaBackOffice
             GetWindow<Buildwindows>().Close();
         }
 
+        /// <summary>
+        /// Pendant BuildPipeline.BuildPlayer, l'éditeur ne redessine plus cette fenêtre (barre figée) et Unity affiche
+        /// sa propre barre de progression au centre de l'écran. Au premier plan et centrée, cette fenêtre la masquait :
+        /// on croyait le build bloqué alors qu'il avançait derrière. On retire donc le « toujours au premier plan » et
+        /// on la remonte en haut de l'écran le temps du build Unity.
+        /// </summary>
+        public static void YieldToUnityProgress()
+        {
+            s_yieldToUnity = true;
+            IntPtr hwnd = FindWindow(null, "Varonia Build");
+            if (hwnd != IntPtr.Zero) SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+            foreach (var w in Resources.FindObjectsOfTypeAll<Buildwindows>())
+            {
+                w._topmost = false;
+                var p = w.position;
+                w.position = new Rect(p.x, 60f, p.width, p.height);
+            }
+        }
+
+        /// <summary>Fin du build Unity : la fenêtre repasse au premier plan pour les étapes zip / copie serveur.</summary>
+        public static void EndYieldToUnityProgress()
+        {
+            s_yieldToUnity = false;
+            foreach (var w in Resources.FindObjectsOfTypeAll<Buildwindows>())
+            {
+                w._topmost = false;
+                w.Repaint();
+            }
+        }
+
         void OnEnable()          => _topmost = false;
         void OnInspectorUpdate() => Repaint();
 
         void OnGUI()
         {
-            if (!_topmost)
+            if (!_topmost && !s_yieldToUnity)
             {
                 IntPtr hwnd = FindWindow(null, "Varonia Build");
                 if (hwnd != IntPtr.Zero) { SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE); _topmost = true; }
