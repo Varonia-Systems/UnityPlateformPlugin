@@ -194,6 +194,13 @@ namespace VaroniaBackOffice
         /// </summary>
         public string HeadsetName = "";
 
+        /// <summary>
+        /// VRS (Variable Rate Shading) : true = autorisé, false = désactivé.
+        /// Simple drapeau de configuration, lu par le jeu ; le back office ne l'applique pas
+        /// lui-même. Par défaut false (comportement inchangé pour les configs existantes).
+        /// </summary>
+        public bool VRS = false;
+
         // ─── Headset resolution ───────────────────────────────────────────────────
 
         /// <summary>

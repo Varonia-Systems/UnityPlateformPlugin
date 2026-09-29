@@ -465,6 +465,7 @@ namespace VaroniaBackOffice
             { "Devices", "Per-weapon binding list. Index in this list = weaponIndex used by VaroniaInput / VaroniaWeaponTracking." },
 
             // VR
+            { "VRS",         "Variable Rate Shading: true = allowed, false = off. Read by the game; the back office does not apply it itself." },
             { "HeadsetName", "Manual override for detected VR headset name (e.g. 'Pico 4 Ultra', 'Vive Focus 3'). Leave empty to auto-detect via OpenVR / OpenXR. Drives debug latency chart selection. A name containing 'pulsar' selects neither the VSVR nor the VBS chart." },
         };
 
