@@ -26,6 +26,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using UnityEngine;
 using UnityEngine.Events;
 using uPLibrary.Networking.M2Mqtt;
@@ -89,11 +90,33 @@ namespace M2MqttUnity
         /// </summary>
         public event Action ConnectionFailed;
 
+        // [Varonia] État de la tentative de connexion en cours. La connexion M2Mqtt (DNS, socket,
+        // attente du CONNACK) est entièrement bloquante : exécutée sur le main thread elle gelait
+        // le jeu au démarrage quand le broker était lent ou injoignable. Elle part donc sur un
+        // thread de fond, et ces champs (volatile : écrits par ce thread, lus par la coroutine)
+        // ramènent le résultat sur le main thread.
+        private volatile bool connectFinished;
+        private volatile MqttClient connectResult;
+        private volatile string connectError;
+        // Connexion abandonnée (composant détruit / appli fermée) : le thread referme lui-même le
+        // client s'il arrive trop tard, sinon ses threads internes resteraient actifs.
+        private volatile bool connectAbandoned;
+        private bool connecting = false;
+
+        /// <summary>
+        /// True while a connection attempt is running in background.
+        /// </summary>
+        public bool IsConnecting { get { return connecting; } }
+
         /// <summary>
         /// Connect to the broker using current settings.
         /// </summary>
         public virtual void Connect()
         {
+            if (connecting)
+            {
+                return;
+            }
             if (client == null || !client.IsConnected)
             {
                 StartCoroutine(DoConnect());
@@ -242,7 +265,9 @@ namespace M2MqttUnity
                     {
                         if (msg.Topic.StartsWith("ServerToUnity"))
                             DecodeMessage(msg.Topic, msg.Message);
-                        else
+                        else if (ReceiveMsg != null)
+                            // [Varonia] null quand plus aucun consommateur n'est abonné (armes
+                            // détruites entre deux scènes) : ce n'est pas une erreur.
                             ReceiveMsg.Invoke(msg.Topic, msg.Message);
                     }
                     catch (System.Exception e)
@@ -284,66 +309,120 @@ namespace M2MqttUnity
         /// <returns>The execution is done in a coroutine.</returns>
         private IEnumerator DoConnect()
         {
+            connecting = true;
+
             // wait for the given delay
             yield return new WaitForSecondsRealtime(connectionDelay / 1000f);
             // leave some time to Unity to refresh the UI
             yield return new WaitForEndOfFrame();
 
-            // create client instance 
-            if (client == null)
+            // un client issu d'une tentative précédente ratée est jeté avant de réessayer
+            if (client != null && !client.IsConnected)
             {
-                try
-                {
-#if (!UNITY_EDITOR && UNITY_WSA_10_0 && !ENABLE_IL2CPP)
-                    client = new MqttClient(brokerAddress,brokerPort,isEncrypted, isEncrypted ? MqttSslProtocols.SSLv3 : MqttSslProtocols.None);
-#else
-                    client = new MqttClient(brokerAddress, brokerPort, isEncrypted, null, null, isEncrypted ? MqttSslProtocols.SSLv3 : MqttSslProtocols.None);
-                    //System.Security.Cryptography.X509Certificates.X509Certificate cert = new System.Security.Cryptography.X509Certificates.X509Certificate();
-                    //client = new MqttClient(brokerAddress, brokerPort, isEncrypted, cert, null, MqttSslProtocols.TLSv1_0, MyRemoteCertificateValidationCallback);
-#endif
-                }
-                catch (Exception e)
-                {
-                    client = null;
-                    Debug.LogErrorFormat("CONNECTION FAILED! {0}", e.ToString());
-                    OnConnectionFailed(e.Message);
-                    yield break;
-                }
+                CloseConnection();
             }
-            else if (client.IsConnected)
+            else if (client != null)
             {
+                connecting = false;
                 yield break;
             }
+
             OnConnecting();
 
             // leave some time to Unity to refresh the UI
             yield return new WaitForEndOfFrame();
-            yield return new WaitForEndOfFrame();
 
-            client.Settings.TimeoutOnConnection = timeoutOnConnection;
+            // [Varonia] Copies locales : le thread de fond ne doit toucher ni à l'API Unity ni à
+            // des champs que l'inspecteur pourrait modifier pendant la tentative.
+            string address = brokerAddress;
+            int port = brokerPort;
+            bool encrypted = isEncrypted;
+            int timeout = timeoutOnConnection;
+            string userName = mqttUserName;
+            string password = mqttPassword;
             string clientId = Guid.NewGuid().ToString();
-            try
+
+            connectFinished = false;
+            connectResult = null;
+            connectError = null;
+            connectAbandoned = false;
+
+            Thread connectThread = new Thread(() =>
             {
-                client.Connect(clientId, mqttUserName, mqttPassword);
+                MqttClient newClient = null;
+                try
+                {
+                    // création du client : résolution DNS incluse (bloquant)
+#if (!UNITY_EDITOR && UNITY_WSA_10_0 && !ENABLE_IL2CPP)
+                    newClient = new MqttClient(address, port, encrypted, encrypted ? MqttSslProtocols.SSLv3 : MqttSslProtocols.None);
+#else
+                    newClient = new MqttClient(address, port, encrypted, null, null, encrypted ? MqttSslProtocols.SSLv3 : MqttSslProtocols.None);
+#endif
+                    newClient.Settings.TimeoutOnConnection = timeout;
+                    // ouverture du socket + attente du CONNACK (bloquant)
+                    newClient.Connect(clientId, userName, password);
+
+                    if (!newClient.IsConnected)
+                    {
+                        // broker joint mais connexion refusée : on referme, sinon les threads
+                        // internes du client resteraient actifs
+                        connectError = "CONNECTION FAILED!";
+                        try { newClient.Disconnect(); }
+                        catch { }
+                    }
+                    else if (connectAbandoned)
+                    {
+                        // trop tard : plus personne pour exploiter ce client, on le referme ici
+                        try { newClient.Disconnect(); }
+                        catch { }
+                    }
+                    else
+                    {
+                        connectResult = newClient;
+                    }
+                }
+                catch (Exception e)
+                {
+                    connectError = e.Message;
+                    if (newClient != null)
+                    {
+                        try { newClient.Disconnect(); }
+                        catch { }
+                    }
+                }
+                finally
+                {
+                    connectFinished = true;
+                }
+            });
+            // thread de fond : ne doit jamais empêcher la fermeture du jeu
+            connectThread.IsBackground = true;
+            connectThread.Start();
+
+            // le jeu continue de tourner normalement pendant la tentative
+            while (!connectFinished)
+            {
+                yield return null;
             }
-            catch (Exception e)
+
+            connecting = false;
+
+            if (connectResult != null)
             {
-                client = null;
-                Debug.LogErrorFormat("Failed to connect to {0}:{1}:\n{2}", brokerAddress, brokerPort, e.ToString());
-                OnConnectionFailed(e.Message);
-                yield break;
-            }
-            if (client.IsConnected)
-            {
+                client = connectResult;
+                connectResult = null;
                 client.ConnectionClosed += OnMqttConnectionClosed;
-                // register to message received 
+                // register to message received
                 client.MqttMsgPublishReceived += OnMqttMessageReceived;
                 mqttClientConnected = true;
                 OnConnected();
             }
             else
             {
-                OnConnectionFailed("CONNECTION FAILED!");
+                client = null;
+                string error = connectError ?? "CONNECTION FAILED!";
+                Debug.LogWarningFormat("Failed to connect to {0}:{1}: {2}", address, port, error);
+                OnConnectionFailed(error);
             }
         }
 
@@ -356,6 +435,8 @@ namespace M2MqttUnity
 
         private void CloseConnection()
         {
+            // [Varonia] une tentative encore en vol ne doit pas aboutir derrière notre dos
+            connectAbandoned = true;
             mqttClientConnected = false;
             if (client != null)
             {

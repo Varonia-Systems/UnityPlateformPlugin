@@ -234,7 +234,21 @@ namespace uPLibrary.Networking.M2Mqtt
         {
             this.socket = new Socket(this.remoteIpAddress.GetAddressFamily(), SocketType.Stream, ProtocolType.Tcp);
             // try connection to the broker
+#if !(MF_FRAMEWORK_VERSION_V4_2 || MF_FRAMEWORK_VERSION_V4_3 || COMPACT_FRAMEWORK)
+            // [Varonia] Socket.Connect() bloque jusqu'au timeout TCP de l'OS (~20 s) si l'hôte
+            // ne répond pas. BeginConnect + attente bornée fait échouer vite une tentative vers
+            // un broker absent, pour pouvoir réessayer sans immobiliser le thread appelant.
+            IAsyncResult connectResult = this.socket.BeginConnect(new IPEndPoint(this.remoteIpAddress, this.remotePort), null, null);
+            if (!connectResult.AsyncWaitHandle.WaitOne(MqttSettings.MQTT_SOCKET_CONNECT_TIMEOUT, false))
+            {
+                try { this.socket.Close(); }
+                catch { }
+                throw new SocketException((int)SocketError.TimedOut);
+            }
+            this.socket.EndConnect(connectResult);
+#else
             this.socket.Connect(new IPEndPoint(this.remoteIpAddress, this.remotePort));
+#endif
 
 #if SSL
             // secure channel requested

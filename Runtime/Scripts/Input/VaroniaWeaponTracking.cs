@@ -67,7 +67,7 @@ namespace VBO_Ultimate.Runtime.Scripts.Input
 
         // ── OpenXR Override ──
         public ItemTracking.OpenXRDeviceType overriddenOpenXRDeviceType = ItemTracking.OpenXRDeviceType.ViveTracker;
-        public ItemTracking.ViveTrackerRole  overriddenViveTrackerRole  = ItemTracking.ViveTrackerRole.HandheldObject;
+        public ItemTracking.ViveTrackerRole  overriddenViveTrackerRole  = ItemTracking.ViveTrackerRole.First;
 
         [Header("État du tracking (lecture seule)")]
         [SerializeField] private bool trackingLost = false;
@@ -98,58 +98,12 @@ namespace VBO_Ultimate.Runtime.Scripts.Input
             var binding = VaroniaWeaponRegistry.GetParent(slot);
             int controllerId = (int)binding.Controller;
 
-            // ── Tracker enfant (suivi) ──
-            //   • ForceSteamId >= 0 → SteamVR par index (autoFind off).
-            //   • sinon Identifier renseigné → SteamVR par serial (autoFind + filtre serial).
-            //   • sinon (-1 ET pas d'Identifier) → ancien système : auto-find, prend le 1er tracker.
+            // The tracker child supplies the OpenXR role or the existing SteamVR identifier/index.
             var tracker = VaroniaWeaponRegistry.GetTracker(slot);
             if (tracker != null)
-            {
-                overrideAutoFind  = true;
-                overriddenBackend = ItemTracking.TrackingBackend.SteamVR;
-#if STEAMVR_ENABLED
-                bool hasIndex  = tracker.ForceSteamId >= 0;
-                bool hasSerial = !string.IsNullOrEmpty(tracker.Identifier);
-
-                // Défaut projet : le mode choisi n'utilise QUE son champ. Si ce champ n'est pas
-                // renseigné → auto-find (l'autre champ est ignoré, pas de fallback croisé).
-                var settings = VaroniaRuntimeSettings.Load();
-                bool preferIndex = settings != null &&
-                                   settings.defaultTrackerSource == TrackerTrackingSource.ForceSteamIndex;
-
-                bool useIndex  =  preferIndex && hasIndex;
-                bool useSerial = !preferIndex && hasSerial;
-
-                if (useIndex)
-                {
-                    overriddenAutoFind        = false; // index précis → pas de scan
-                    overriddenUseSerialFilter = false;
-                    overriddenTrackerIndex    = tracker.ForceSteamId;
-                    Debug.Log($"[VaroniaWeaponTracking] slot={slot} : tracker SteamVR par index {tracker.ForceSteamId}.");
-                }
-                else if (useSerial)
-                {
-                    overriddenAutoFind        = true;  // FindTracker() ne tourne que si autoFind == true
-                    overriddenUseSerialFilter = true;
-                    overriddenTargetSerial    = tracker.Identifier;
-                    Debug.Log($"[VaroniaWeaponTracking] slot={slot} : tracker SteamVR par serial '{tracker.Identifier}'.");
-                }
-                else
-                {
-                    // Ni index ni serial → ancien système : auto-find du premier tracker (aucune erreur).
-                    overriddenAutoFind        = true;
-                    overriddenUseSerialFilter = false;
-                    Debug.Log($"[VaroniaWeaponTracking] slot={slot} : tracker SteamVR auto-find (premier tracker).");
-                }
-#else
-                if (tracker.ForceSteamId >= 0)
-                    Debug.LogWarning($"[VaroniaWeaponTracking] slot={slot} : ForceSteamId défini mais STEAMVR_ENABLED off — ignoré.");
-#endif
-            }
+                ConfigureTracker(tracker);
             else
-            {
                 BackOfficeVaronia.ReportError($"Tracker introuvable pour l'arme #{slot} ({binding.Controller}). Ajoute un enfant tracker (LinkParent = Identifier de l'arme) dans GlobalConfig.Devices.");
-            }
 
             _WeaponInfo entry = VaroniaWeapon.Instance.GetWeaponById(controllerId);
 
@@ -174,6 +128,37 @@ namespace VBO_Ultimate.Runtime.Scripts.Input
             {
                 Debug.LogWarning($"[VaroniaWeaponTracking] No weapon prefab found for Controller ID: {controllerId}");
             }
+        }
+
+        private void ConfigureTracker(WeaponBinding tracker)
+        {
+            bool useOpenXR = overrideAutoFind && overriddenBackend == ItemTracking.TrackingBackend.OpenXR;
+#if STEAMVR_ENABLED
+            var settings = VaroniaRuntimeSettings.Load();
+            useOpenXR |= settings != null && !settings.enableSteamVR;
+#else
+            useOpenXR = true;
+#endif
+            overrideAutoFind = true;
+            if (useOpenXR)
+            {
+                overriddenBackend = ItemTracking.TrackingBackend.OpenXR;
+                overriddenOpenXRDeviceType = ItemTracking.OpenXRDeviceType.ViveTracker;
+                overriddenViveTrackerRole = tracker.Role;
+                Debug.Log($"[VaroniaWeaponTracking] slot={weaponIndex} : tracker OpenXR, rôle {tracker.Role}.");
+                return;
+            }
+
+#if STEAMVR_ENABLED
+            overriddenBackend = ItemTracking.TrackingBackend.SteamVR;
+            bool preferIndex = settings != null && settings.defaultTrackerSource == TrackerTrackingSource.ForceSteamIndex;
+            bool useIndex = preferIndex && tracker.ForceSteamId >= 0;
+            bool useSerial = !preferIndex && !string.IsNullOrEmpty(tracker.Identifier);
+            overriddenAutoFind = !useIndex;
+            overriddenUseSerialFilter = useSerial;
+            if (useIndex) overriddenTrackerIndex = tracker.ForceSteamId;
+            if (useSerial) overriddenTargetSerial = tracker.Identifier;
+#endif
         }
 
         private void ApplyTrackerSettings()

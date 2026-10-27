@@ -668,8 +668,11 @@ namespace uPLibrary.Networking.M2Mqtt
             // unlock keep alive thread and wait
             this.keepAliveEvent.Set();
 
+            // [Varonia] Attente BORNÉE : Close() est appelé depuis le main thread (fermeture du
+            // jeu, sortie du mode Play). Si le thread keep-alive est bloqué dans un Ping() vers un
+            // broker muet, une attente infinie gelait Unity à l'arrêt.
             if (this.keepAliveEventEnd != null)
-                this.keepAliveEventEnd.WaitOne();
+                this.keepAliveEventEnd.WaitOne(2000);
 #endif
 
             // clear all queues

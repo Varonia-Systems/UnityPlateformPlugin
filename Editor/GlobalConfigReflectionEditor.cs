@@ -586,6 +586,9 @@ namespace VaroniaBackOffice
                 };
                 EditorGUILayout.BeginHorizontal();
                 GUILayout.Label("",            colHeaderStyle, GUILayout.Width(30));
+                GUILayout.Label(new GUIContent("Role",
+                    "OpenXR tracker role. First selects the first actively tracked device, regardless of role."),
+                    colHeaderStyle, GUILayout.Width(120));
                 GUILayout.Label(new GUIContent("Controller",
                     "Weapon model / controller type for this slot. The numeric value in parentheses is the controller ID used by VaroniaWeapon to spawn the right prefab."), colHeaderStyle);
                 GUILayout.Label(new GUIContent("Identifier",
@@ -603,6 +606,9 @@ namespace VaroniaBackOffice
 
             // ── Lignes : [index] [Controller dropdown] [Identifier] [OR] [Force Steam] [Default] [✕] ──
             int toRemove = -1;
+            var roleValues = (ItemTracking.ViveTrackerRole[])Enum.GetValues(typeof(ItemTracking.ViveTrackerRole));
+            Array.Sort(roleValues); // First (-1) before the existing serialized roles (0..16).
+            var roleLabels = Array.ConvertAll(roleValues, role => role.ToString());
             var controllerValues = Enum.GetValues(typeof(Controller));
             var controllerNames  = Enum.GetNames(typeof(Controller));
             string[] controllerLabels = new string[controllerNames.Length];
@@ -724,6 +730,19 @@ namespace VaroniaBackOffice
                 }
                 GUILayout.Label(new GUIContent($"#{i}",
                     hasParent ? "This device has a parent (LinkParent)." : null), idxStyle, GUILayout.Width(30));
+
+                // Role belongs to the tracker child; weapon/controller IDs stay unchanged.
+                using (new EditorGUI.DisabledScope(!isTracker))
+                {
+                    int roleIndex = Array.IndexOf(roleValues, entry.Role);
+                    EditorGUI.BeginChangeCheck();
+                    int nextRoleIndex = EditorGUILayout.Popup(Mathf.Max(roleIndex, 0), roleLabels, GUILayout.Width(120));
+                    if (EditorGUI.EndChangeCheck())
+                    {
+                        entry.Role = roleValues[nextRoleIndex];
+                        _isDirty = true;
+                    }
+                }
 
                 // Controller dropdown
                 int curIdx = Array.IndexOf(controllerValues, entry.Controller);

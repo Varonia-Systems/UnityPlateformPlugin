@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using UnityEngine;
 using UnityEngine.Events;
 
@@ -32,19 +32,25 @@ namespace VaroniaBackOffice
 
         public enum ViveTrackerRole
         {
-            HandheldObject,
-            LeftFoot,
-            RightFoot,
-            LeftShoulder,
-            RightShoulder,
-            LeftElbow,
-            RightElbow,
-            LeftKnee,
-            RightKnee,
-            Waist,
-            Chest,
-            Camera,
-            Keyboard
+            // Preserve the numeric IDs already serialized in scenes and prefabs.
+            First = -1,
+            HandheldObject = 0,
+            LeftFoot = 1,
+            RightFoot = 2,
+            LeftShoulder = 3,
+            RightShoulder = 4,
+            LeftElbow = 5,
+            RightElbow = 6,
+            LeftKnee = 7,
+            RightKnee = 8,
+            Waist = 9,
+            Chest = 10,
+            Camera = 11,
+            Keyboard = 12,
+            LeftWrist = 13,
+            RightWrist = 14,
+            LeftAnkle = 15,
+            RightAnkle = 16
         }
 
         // ─────────────────────────────────────────────
@@ -71,7 +77,7 @@ namespace VaroniaBackOffice
         // ── OpenXR ──────────────────────────────────
         [Header("OpenXR — Configuration")]
         public OpenXRDeviceType openXRDeviceType = OpenXRDeviceType.ViveTracker;
-        public ViveTrackerRole  viveTrackerRole  = ViveTrackerRole.HandheldObject;
+        public ViveTrackerRole  viveTrackerRole  = ViveTrackerRole.First;
 
         // ── Commun ───────────────────────────────────
         [Header("Offsets")]
@@ -115,6 +121,8 @@ namespace VaroniaBackOffice
 #if ENABLE_INPUT_SYSTEM
         private InputDevice _openXRDevice;
         private bool        _openXRBound = false;
+        private string _selectedOpenXRSerial = "";
+        private string _selectedOpenXRProduct = "";
 #endif
 
         // ─────────────────────────────────────────────
@@ -170,16 +178,15 @@ namespace VaroniaBackOffice
         void OnEnable()
         {
 #if ENABLE_INPUT_SYSTEM
-            if (backend == TrackingBackend.OpenXR)
-                InputSystem.onDeviceChange += OnInputDeviceChange;
+            // Backend may be configured after Instantiate/OnEnable by the weapon spawner.
+            InputSystem.onDeviceChange += OnInputDeviceChange;
 #endif
         }
 
         void OnDisable()
         {
 #if ENABLE_INPUT_SYSTEM
-            if (backend == TrackingBackend.OpenXR)
-                InputSystem.onDeviceChange -= OnInputDeviceChange;
+            InputSystem.onDeviceChange -= OnInputDeviceChange;
 #endif
 
 #if STEAMVR_ENABLED
@@ -188,6 +195,8 @@ namespace VaroniaBackOffice
 #if ENABLE_INPUT_SYSTEM
             _openXRBound  = false;
             _openXRDevice = null;
+            _selectedOpenXRSerial = "";
+            _selectedOpenXRProduct = "";
 #endif
         }
 
@@ -345,7 +354,7 @@ namespace VaroniaBackOffice
 
         void UpdateOpenXR()
         {
-#if OPENXR
+#if OPENXR && ENABLE_INPUT_SYSTEM
             if (!_openXRBound || _openXRDevice == null || !_openXRDevice.added)
                 TryBindOpenXRDevice();
 
@@ -379,7 +388,12 @@ namespace VaroniaBackOffice
                     break;
 
                 case OpenXRDeviceType.ViveTracker:
-                    _openXRDevice = FindViveTracker(viveTrackerRole);
+                    _openXRDevice = FindViveTracker(viveTrackerRole, _selectedOpenXRSerial, _selectedOpenXRProduct);
+                    if (_openXRDevice != null)
+                    {
+                        _selectedOpenXRSerial = _openXRDevice.description.serial ?? "";
+                        _selectedOpenXRProduct = _openXRDevice.description.product ?? "";
+                    }
                     break;
             }
 
@@ -404,24 +418,71 @@ namespace VaroniaBackOffice
 #endif
         
 #if ENABLE_INPUT_SYSTEM
-        static InputDevice FindViveTracker(ViveTrackerRole role)
+        static InputDevice FindViveTracker(ViveTrackerRole role, string serial = "", string product = "")
         {
+            string rolePath = RoleToString(role);
+            if (role != ViveTrackerRole.First && string.IsNullOrEmpty(rolePath)) return null;
 
-            string roleStr = RoleToString(role);
             foreach (var dev in InputSystem.devices)
             {
-                if (dev is ViveTrackerProfile.ViveTracker)
-                {
-                    if (dev.displayName.IndexOf(roleStr, StringComparison.OrdinalIgnoreCase) >= 0)
-                        return dev;
-                }
+                if (!(dev is ViveTrackerProfile.ViveTracker tracker)) continue;
+                if (!string.IsNullOrEmpty(serial) && dev.description.serial != serial) continue;
+                // OpenXR often exposes a role endpoint rather than a hardware serial.
+                if (string.IsNullOrEmpty(serial) && !string.IsNullOrEmpty(product)
+                    && dev.description.product != product) continue;
+                if (role != ViveTrackerRole.First && !MatchesRole(dev, rolePath)) continue;
+                if (TryReadTrackedPose(tracker, out _, out _)) return dev;
             }
-
             return null;
         }
+
+        static bool MatchesRole(InputDevice device, string rolePath)
+        {
+            string expected = NormalizeRole(rolePath);
+            if (NormalizeRole(device.description.product).Contains(expected)
+                || NormalizeRole(device.displayName).Contains(expected)) return true;
+            foreach (var usage in device.usages)
+                if (NormalizeRole(usage.ToString()) == expected) return true;
+            return false;
+        }
+
+        static string NormalizeRole(string value) =>
+            (value ?? "").Replace("_", "").Replace(" ", "").Replace("-", "").ToLowerInvariant();
+
+        static bool TryReadTrackedPose(TrackedDevice device, out Vector3 pos, out Quaternion rot)
+        {
+            pos = Vector3.zero;
+            rot = Quaternion.identity;
+            if (device == null || !device.added || !device.enabled) return false;
+            const int poseFlags = (int)(UnityEngine.XR.InputTrackingState.Position | UnityEngine.XR.InputTrackingState.Rotation);
+
+            // Vive Tracker : seule la PoseControl « devicePose » est alignée sur l'état envoyé par le
+            // plugin OpenXR. devicePosition / deviceRotation (offsets 60/72 en dur dans le layout)
+            // tombent sur IsTracked/TrackingState et hors de l'état : rotation nulle → jamais trouvé.
+            if (device is ViveTrackerProfile.ViveTracker vive && vive.devicePose != null)
+            {
+                var pose = vive.devicePose;
+                if (pose.isTracked.ReadValue() < 0.5f) return false;
+                if ((pose.trackingState.ReadValue() & poseFlags) != poseFlags) return false;
+                pos = pose.position.ReadValue();
+                rot = pose.rotation.ReadValue();
+            }
+            else
+            {
+                if (device.isTracked.ReadValue() < 0.5f) return false;
+                if ((device.trackingState.ReadValue() & poseFlags) != poseFlags) return false;
+                pos = device.devicePosition.ReadValue();
+                rot = device.deviceRotation.ReadValue();
+            }
+            return IsFinite(pos.x) && IsFinite(pos.y) && IsFinite(pos.z)
+                && IsFinite(rot.x) && IsFinite(rot.y) && IsFinite(rot.z) && IsFinite(rot.w)
+                && Quaternion.Dot(rot, rot) > 0.0001f;
+        }
+
+        static bool IsFinite(float value) => !float.IsNaN(value) && !float.IsInfinity(value);
 #endif
 
-        static string RoleToString(ViveTrackerRole role)
+        public static string RoleToString(ViveTrackerRole role)
         {
             switch (role)
             {
@@ -438,6 +499,10 @@ namespace VaroniaBackOffice
                 case ViveTrackerRole.Chest:           return "chest";
                 case ViveTrackerRole.Camera:          return "camera";
                 case ViveTrackerRole.Keyboard:        return "keyboard";
+                case ViveTrackerRole.LeftWrist:       return "left_wrist";
+                case ViveTrackerRole.RightWrist:      return "right_wrist";
+                case ViveTrackerRole.LeftAnkle:       return "left_ankle";
+                case ViveTrackerRole.RightAnkle:      return "right_ankle";
                 default:                              return "";
             }
         }
@@ -445,55 +510,17 @@ namespace VaroniaBackOffice
 #if ENABLE_INPUT_SYSTEM
         void ApplyPoseOpenXR()
         {
-
-            Vector3    pos;
-            Quaternion rot;
-            bool       tracked = false;
-
-            if (openXRDeviceType == OpenXRDeviceType.LeftController ||
-                openXRDeviceType == OpenXRDeviceType.RightController)
-            {
-                var ctrl = _openXRDevice as XRController;
-                if (ctrl == null) { SetTrackingState(false); return; }
-
-                pos     = ctrl.devicePosition.ReadValue();
-                rot     = ctrl.deviceRotation.ReadValue();
-                tracked = ctrl.isTracked.ReadValue() > 0.5f;
-            }
-            else
-            {
-                var tracker = _openXRDevice as ViveTrackerProfile.ViveTracker;
-                if (tracker == null) { SetTrackingState(false); return; }
-
-                pos     = tracker.devicePosition.ReadValue();
-                rot     = tracker.deviceRotation.ReadValue();
-                tracked = tracker.isTracked.ReadValue() > 0.5f;
-            }
-
-            if (!tracked)
+            if (!TryReadTrackedPose(_openXRDevice as TrackedDevice, out Vector3 pos, out Quaternion rot))
             {
                 SetTrackingState(false);
                 return;
             }
 
-            Transform targetT = (applyToParent && transform.parent != null)
-                ? transform.parent : transform;
-
+            Transform targetT = (applyToParent && transform.parent != null) ? transform.parent : transform;
             targetT.localPosition = pos + (rot * positionOffset);
             targetT.localRotation = rot * Quaternion.Euler(rotationOffset);
-
-            if (pos == _lastPosition)
-            {
-                _frozenFrameCount++;
-                if (_frozenFrameCount >= 3) SetTrackingState(false);
-            }
-            else
-            {
-                _frozenFrameCount = 0;
-                SetTrackingState(true);
-            }
-            _lastPosition = pos;
-
+            // A motionless gun can still have a valid tracked pose.
+            SetTrackingState(true);
         }
 #endif
 
@@ -501,8 +528,14 @@ namespace VaroniaBackOffice
         void OnInputDeviceChange(InputDevice dev, InputDeviceChange change)
         {
 
-            if (change == InputDeviceChange.Added || change == InputDeviceChange.Removed)
+            // Unrelated devices must not steal a gun already bound to a tracker.
+            if (dev == _openXRDevice && (change == InputDeviceChange.Removed
+                || change == InputDeviceChange.Disconnected))
+            {
                 _openXRBound = false;
+                found = false;
+                SetTrackingState(false);
+            }
         }
 #endif
 
@@ -519,6 +552,8 @@ namespace VaroniaBackOffice
 #if ENABLE_INPUT_SYSTEM
             _openXRBound  = false;
             _openXRDevice = null;
+            _selectedOpenXRSerial = "";
+            _selectedOpenXRProduct = "";
 #endif
             SetTrackingState(false);
         }

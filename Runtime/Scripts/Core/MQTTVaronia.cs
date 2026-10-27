@@ -36,11 +36,21 @@ namespace VaroniaBackOffice
         
         private void HandleConfigLoaded()
         {
-            Debug.Log("#[MQTT] Config received via Event. Initializing connection...");
             var cfg = BackOfficeVaronia.Instance.config;
+
+            // Pas de broker configuré (poste sans back office) : inutile de tenter quoi que ce soit,
+            // sinon une adresse vide part en résolution DNS et finit sur la machine locale.
+            if (cfg == null || string.IsNullOrEmpty(cfg.MQTT_ServerIP))
+            {
+                Debug.Log("#[MQTT] Aucun serveur MQTT configuré — connexion ignorée.");
+                return;
+            }
+
+            Debug.Log("#[MQTT] Config received via Event. Initializing connection...");
             this.brokerAddress = cfg.MQTT_ServerIP;
-    
-            // Now connect
+
+            // Connexion lancée en tâche de fond (voir M2MqttUnityClient) : le démarrage du jeu
+            // n'attend jamais le broker.
             Connect();
         }
         
@@ -60,16 +70,30 @@ namespace VaroniaBackOffice
             
             Subscribe();
 
-            // rejoue les messages émis avant l'établissement de la connexion
-            while (_pendingMsgs.Count > 0)
+            // Rejoue les messages émis avant l'établissement de la connexion. Flush BORNÉ : si la
+            // connexion retombe pendant la purge, PublishMsg remet le message en file — reboucler
+            // sur _pendingMsgs tant qu'elle n'est pas vide tournerait alors indéfiniment (freeze).
+            int toFlush = _pendingMsgs.Count;
+            for (int i = 0; i < toFlush && _pendingMsgs.Count > 0; i++)
                 PublishMsg(_pendingMsgs.Dequeue());
         }
 
-        
-        
+
+
         public void Subscribe()
         {
-            client.Subscribe(new string[] { "ServerToUnity/" + BackOfficeVaronia.Instance.config.MQTT_IDClient }, new byte[] { MqttMsgBase.QOS_LEVEL_EXACTLY_ONCE });
+            if (client == null || !client.IsConnected)
+                return;
+
+            try
+            {
+                client.Subscribe(new string[] { "ServerToUnity/" + BackOfficeVaronia.Instance.config.MQTT_IDClient }, new byte[] { MqttMsgBase.QOS_LEVEL_EXACTLY_ONCE });
+            }
+            catch (Exception e)
+            {
+                // Connexion perdue entre-temps : la reconnexion repassera par OnConnected.
+                Debug.LogWarning("[Back Office Varonia] Abonnement MQTT impossible : " + e.Message);
+            }
         }
         
         // Messages émis avant que la connexion (asynchrone) soit établie : mis en attente
@@ -136,7 +160,53 @@ namespace VaroniaBackOffice
         
         protected override void OnConnectionFailed(string errorMessage)
         {
-            Debug.LogError($"[Back Office Varonia] MQTT Fail to connect : {errorMessage}");
+            // LogWarning et pas LogError : un broker absent est un cas de fonctionnement normal
+            // (poste hors back office, serveur pas encore démarré) et le jeu continue sans lui.
+            Debug.LogWarning($"[Back Office Varonia] MQTT Fail to connect : {errorMessage}");
+            ScheduleReconnect();
+        }
+
+        protected override void OnConnectionLost()
+        {
+            base.OnConnectionLost();
+            ScheduleReconnect();
+        }
+
+
+        // Reconnexion : le démarrage ne doit jamais attendre le broker. Si la connexion échoue ou
+        // tombe, on retente en tâche de fond toutes les ReconnectDelay secondes — le jeu tourne
+        // normalement en attendant, et les messages émis entre-temps sont mis en file (PublishMsg).
+        const float ReconnectDelay = 5f;
+        private Coroutine _reconnectRoutine;
+
+        private void ScheduleReconnect()
+        {
+            // une seule relance programmée à la fois
+            if (_reconnectRoutine != null) return;
+            // rien à retenter sans broker configuré
+            var cfg = BackOfficeVaronia.Instance != null ? BackOfficeVaronia.Instance.config : null;
+            if (cfg == null || string.IsNullOrEmpty(cfg.MQTT_ServerIP)) return;
+            if (!gameObject.activeInHierarchy) return;
+
+            _reconnectRoutine = StartCoroutine(ReconnectLoop());
+        }
+
+        IEnumerator ReconnectLoop()
+        {
+            while (client == null || !client.IsConnected)
+            {
+                // WaitForSecondsRealtime : indépendant de Time.timeScale (pauses, chargements)
+                yield return new WaitForSecondsRealtime(ReconnectDelay);
+
+                if (client != null && client.IsConnected) break;
+
+                if (!IsConnecting) Connect();
+
+                // on laisse la tentative se terminer avant d'en reprogrammer une
+                while (IsConnecting) yield return null;
+            }
+
+            _reconnectRoutine = null;
         }
         
      

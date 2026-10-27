@@ -193,7 +193,9 @@ namespace VBO_Ultimate.Runtime.Scripts.Input
             }
         }
 
-        private void OnDestroy()
+        // virtual : une arme dérivée (MQTT_Weapon) a son propre nettoyage à faire. Sans ça son
+        // OnDestroy masquerait celui-ci et Unity n'appellerait plus ce nettoyage de base.
+        protected virtual void OnDestroy()
         {
             DebugModeOverlay.OnDebugChanged -= OnSuperDebugChanged;
 

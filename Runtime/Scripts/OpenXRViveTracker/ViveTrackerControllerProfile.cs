@@ -102,111 +102,46 @@ namespace UnityEngine.XR.OpenXR.Features.Interactions
         
         protected override void RegisterActionMapsWithRuntime()
         {
-            ActionMapConfig actionMap = new ActionMapConfig()
+            uint revision = OpenXRRuntime.GetExtensionVersion(extensionString);
+            foreach (VaroniaBackOffice.ItemTracking.ViveTrackerRole role in
+                     System.Enum.GetValues(typeof(VaroniaBackOffice.ItemTracking.ViveTrackerRole)))
             {
-                name = "vivetracker",
-                localizedName = kDeviceLocalizedName,
-                desiredInteractionProfile = profile,
-                manufacturer = "HTC",
-                serialNumber = "",
-                deviceInfos = new List<DeviceConfig>()
+                string rolePath = VaroniaBackOffice.ItemTracking.RoleToString(role);
+                if (string.IsNullOrEmpty(rolePath)) continue; // First is a selection mode, not an OpenXR path.
+                if ((int)role >= 13 && revision < 3) continue; // Wrists/ankles require extension revision 3.
+
+                // A distinct product label per endpoint makes its role available to the selector.
+                AddActionMap(new ActionMapConfig
                 {
-                    // XR_NULL_PATH makes it crash?
-                    // new DeviceConfig()
-                    // {
-                    //     characteristics = (InputDeviceCharacteristics)(InputDeviceCharacteristics.TrackedDevice),
-                    //     userPath = "/user/vive_tracker_htcx/role/XR_NULL_PATH"
-                    // },
-                    new DeviceConfig()
+                    name = "vivetracker_" + rolePath,
+                    localizedName = kDeviceLocalizedName + " " + rolePath,
+                    desiredInteractionProfile = profile,
+                    manufacturer = "HTC",
+                    serialNumber = "",
+                    deviceInfos = new List<DeviceConfig>
                     {
-                        characteristics = (InputDeviceCharacteristics)(InputDeviceCharacteristics.TrackedDevice),
-                        userPath = "/user/vive_tracker_htcx/role/handheld_object"
-                    },
-                    new DeviceConfig()
-                    {
-                        characteristics = (InputDeviceCharacteristics)(InputDeviceCharacteristics.TrackedDevice),
-                        userPath = "/user/vive_tracker_htcx/role/left_foot"
-                    },
-                    new DeviceConfig()
-                    {
-                        characteristics = (InputDeviceCharacteristics)(InputDeviceCharacteristics.TrackedDevice),
-                        userPath = "/user/vive_tracker_htcx/role/right_foot"
-                    },
-                    new DeviceConfig()
-                    {
-                        characteristics = (InputDeviceCharacteristics)(InputDeviceCharacteristics.TrackedDevice),
-                        userPath = "/user/vive_tracker_htcx/role/left_shoulder"
-                    },
-                    new DeviceConfig()
-                    {
-                        characteristics = (InputDeviceCharacteristics)(InputDeviceCharacteristics.TrackedDevice),
-                        userPath = "/user/vive_tracker_htcx/role/right_shoulder"
-                    },
-                    new DeviceConfig()
-                    {
-                        characteristics = (InputDeviceCharacteristics)(InputDeviceCharacteristics.TrackedDevice),
-                        userPath = "/user/vive_tracker_htcx/role/left_elbow"
-                    },
-                    new DeviceConfig()
-                    {
-                        characteristics = (InputDeviceCharacteristics)(InputDeviceCharacteristics.TrackedDevice),
-                        userPath = "/user/vive_tracker_htcx/role/right_elbow"
-                    },
-                    new DeviceConfig()
-                    {
-                        characteristics = (InputDeviceCharacteristics)(InputDeviceCharacteristics.TrackedDevice),
-                        userPath = "/user/vive_tracker_htcx/role/left_knee"
-                    },
-                    new DeviceConfig()
-                    {
-                        characteristics = (InputDeviceCharacteristics)(InputDeviceCharacteristics.TrackedDevice),
-                        userPath = "/user/vive_tracker_htcx/role/right_knee"
-                    },
-                    new DeviceConfig()
-                    {
-                        characteristics = (InputDeviceCharacteristics)(InputDeviceCharacteristics.TrackedDevice),
-                        userPath = "/user/vive_tracker_htcx/role/waist"
-                    },
-                    new DeviceConfig()
-                    {
-                        characteristics = (InputDeviceCharacteristics)(InputDeviceCharacteristics.TrackedDevice),
-                        userPath = "/user/vive_tracker_htcx/role/chest"
-                    },
-                    new DeviceConfig()
-                    {
-                        characteristics = (InputDeviceCharacteristics)(InputDeviceCharacteristics.TrackedDevice),
-                        userPath = "/user/vive_tracker_htcx/role/camera"
-                    },
-                    new DeviceConfig()
-                    {
-                        characteristics = (InputDeviceCharacteristics)(InputDeviceCharacteristics.TrackedDevice),
-                        userPath = "/user/vive_tracker_htcx/role/keyboard"
-                    },
-                },
-                actions = new List<ActionConfig>()
-                {
-                    new ActionConfig()
-                    {
-                        name = "devicePose",
-                        localizedName = "Device Pose",
-                        type = ActionType.Pose,
-                        usages = new List<string>()
+                        new DeviceConfig
                         {
-                            "Device"
-                        },
-                        bindings = new List<ActionBinding>()
-                        {
-                            new ActionBinding()
-                            {
-                                interactionPath = gripPose,
-                                interactionProfileName = profile,
-                            }
+                            characteristics = InputDeviceCharacteristics.TrackedDevice,
+                            userPath = "/user/vive_tracker_htcx/role/" + rolePath
                         }
                     },
-                }
-            };
-
-            AddActionMap(actionMap);
+                    actions = new List<ActionConfig>
+                    {
+                        new ActionConfig
+                        {
+                            name = "devicePose",
+                            localizedName = "Device Pose",
+                            type = ActionType.Pose,
+                            usages = new List<string> { "Device" },
+                            bindings = new List<ActionBinding>
+                            {
+                                new ActionBinding { interactionPath = gripPose, interactionProfileName = profile }
+                            }
+                        }
+                    }
+                });
+            }
         }
     }
 }

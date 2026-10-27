@@ -47,10 +47,43 @@ namespace VBO_Ultimate.Runtime.Scripts.Input
 
             Debug.Log($"[MQTT_Weapon] Subscribe to: {MacAdress} (weaponIndex={_weaponIndex})");
 
-            BackOfficeVaronia.Instance.mqttClient.client.Subscribe(
-                new string[] { "DeviceToUnity/" + MacAdress + "/#" },
-                new byte[] { MqttMsgBase.QOS_LEVEL_EXACTLY_ONCE });
+            SubscribeDeviceTopic();
             BackOfficeVaronia.Instance.mqttClient.ReceiveMsg += event_;
+            // Une reconnexion recrée le client MQTT (nouvelle session) : l'abonnement côté broker
+            // est perdu, il faut le reposer à chaque (re)connexion.
+            BackOfficeVaronia.Instance.mqttClient.ConnectionSucceeded += SubscribeDeviceTopic;
+        }
+
+        private void SubscribeDeviceTopic()
+        {
+            var mqtt = BackOfficeVaronia.Instance != null ? BackOfficeVaronia.Instance.mqttClient : null;
+            if (mqtt == null || mqtt.client == null || !mqtt.client.IsConnected || string.IsNullOrEmpty(MacAdress))
+                return;
+
+            try
+            {
+                mqtt.client.Subscribe(
+                    new string[] { "DeviceToUnity/" + MacAdress + "/#" },
+                    new byte[] { MqttMsgBase.QOS_LEVEL_EXACTLY_ONCE });
+            }
+            catch (Exception e)
+            {
+                // Connexion perdue entre-temps : la prochaine reconnexion reposera l'abonnement.
+                Debug.LogWarning($"[MQTT_Weapon] Abonnement à {MacAdress} impossible : {e.Message}");
+            }
+        }
+
+        // Les events MQTT sont portés par MQTTVaronia (durée de vie supérieure à l'arme) : sans
+        // désabonnement, une arme détruite resterait référencée et lèverait une MissingReferenceException.
+        protected override void OnDestroy()
+        {
+            base.OnDestroy();
+
+            if (BackOfficeVaronia.Instance != null && BackOfficeVaronia.Instance.mqttClient != null)
+            {
+                BackOfficeVaronia.Instance.mqttClient.ReceiveMsg -= event_;
+                BackOfficeVaronia.Instance.mqttClient.ConnectionSucceeded -= SubscribeDeviceTopic;
+            }
         }
 
         // Check connection time out 

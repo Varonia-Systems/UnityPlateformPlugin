@@ -47,6 +47,10 @@ namespace VaroniaBackOffice
     [System.Serializable]
     public class WeaponBinding
     {
+        /// <summary>OpenXR tracker role. First accepts the first tracker with a valid pose.</summary>
+        [Tooltip("OpenXR: First = premier tracker actif, sinon uniquement le rôle choisi.")]
+        public ItemTracking.ViveTrackerRole Role = ItemTracking.ViveTrackerRole.First;
+
         /// <summary> Identifiant du contrôleur / modèle d'arme. </summary>
         public Controller Controller = Controller.Unknown;
 

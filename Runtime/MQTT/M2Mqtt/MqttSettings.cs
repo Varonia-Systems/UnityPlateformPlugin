@@ -33,6 +33,9 @@ namespace uPLibrary.Networking.M2Mqtt
         // broker need to receive the first message (CONNECT)
         // within a reasonable amount of time after TCP/IP connection 
         public const int MQTT_CONNECT_TIMEOUT = 30000;
+        // [Varonia] timeout d'ouverture du socket TCP vers le broker. Sans borne, Socket.Connect
+        // attend le timeout TCP de l'OS (~20 s sous Windows) quand l'hôte ne répond pas du tout.
+        public const int MQTT_SOCKET_CONNECT_TIMEOUT = 4000;
         // default inflight queue size
         public const int MQTT_MAX_INFLIGHT_QUEUE_SIZE = int.MaxValue;
 

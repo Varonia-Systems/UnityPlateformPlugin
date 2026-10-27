@@ -61,18 +61,41 @@ namespace VBO_Ultimate.Runtime.Scripts.Input
             VaroniaInput.EnsureWeapon(_weaponIndex);
 
             Debug.Log($"[MQTTInput] Subscribe to {_mac} (Controller={controller}, weaponIndex={_weaponIndex})");
-            BackOfficeVaronia.Instance.mqttClient.client.Subscribe(
-                new string[] { "DeviceToUnity/" + _mac + "/#" },
-                new byte[] { MqttMsgBase.QOS_LEVEL_EXACTLY_ONCE });
+            SubscribeDeviceTopic();
             BackOfficeVaronia.Instance.mqttClient.ReceiveMsg += OnMqtt;
+            // Une reconnexion recrée le client MQTT (nouvelle session) : l'abonnement côté broker
+            // est perdu, il faut le reposer à chaque (re)connexion.
+            BackOfficeVaronia.Instance.mqttClient.ConnectionSucceeded += SubscribeDeviceTopic;
 
             Resolved = true;
+        }
+
+        private void SubscribeDeviceTopic()
+        {
+            var mqtt = BackOfficeVaronia.Instance != null ? BackOfficeVaronia.Instance.mqttClient : null;
+            if (mqtt == null || mqtt.client == null || !mqtt.client.IsConnected || string.IsNullOrEmpty(_mac))
+                return;
+
+            try
+            {
+                mqtt.client.Subscribe(
+                    new string[] { "DeviceToUnity/" + _mac + "/#" },
+                    new byte[] { MqttMsgBase.QOS_LEVEL_EXACTLY_ONCE });
+            }
+            catch (Exception e)
+            {
+                // Connexion perdue entre-temps : la prochaine reconnexion reposera l'abonnement.
+                Debug.LogWarning($"[MQTTInput] Abonnement à {_mac} impossible : {e.Message}");
+            }
         }
 
         private void OnDestroy()
         {
             if (BackOfficeVaronia.Instance != null && BackOfficeVaronia.Instance.mqttClient != null)
+            {
                 BackOfficeVaronia.Instance.mqttClient.ReceiveMsg -= OnMqtt;
+                BackOfficeVaronia.Instance.mqttClient.ConnectionSucceeded -= SubscribeDeviceTopic;
+            }
         }
 
         private void OnMqtt(string title, byte[] value)
