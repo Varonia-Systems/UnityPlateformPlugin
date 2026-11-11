@@ -15,6 +15,15 @@ namespace VaroniaBackOffice
         private static bool _initializedByUs = false;
         private static CVRSystem _system;
 
+        /// <summary>
+        /// Interdit l'init OpenVR en mode BACKGROUND (le jeu tourne volontairement sans
+        /// casque, ex. mode FPS de test). Sinon la session background, jamais fermee dans
+        /// l'editeur, est reprise par le plugin SteamVR : ses actions y sont invalides
+        /// (spam « InvalidHandle »), et elle empoisonne aussi les Play VR suivants.
+        /// Pose par le jeu ; n'est PAS remis a zero par ResetState.
+        /// </summary>
+        public static bool BlockBackgroundInit = false;
+
         // Anti-spam : sans VR, OpenVR.Init() échoue (appel natif lourd/bloquant). On NE le
         // relance PAS à chaque frame — re-tentative seulement toutes les InitRetryCooldown s,
         // et on ne loggue l'indisponibilité qu'une fois.
@@ -35,6 +44,8 @@ namespace VaroniaBackOffice
 
             // Si Unity a déjà initialisé OpenVR (SteamVR natif)
             if (OpenVR.System != null) return OpenVR.System;
+
+            if (BlockBackgroundInit) return null;
 
             // Déjà initialisé par nous (background) → cache, pas de ré-init.
             if (_initializedByUs && _system != null) return _system;

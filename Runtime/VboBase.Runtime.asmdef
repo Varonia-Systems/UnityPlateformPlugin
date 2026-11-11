@@ -10,7 +10,8 @@
         "SteamVR",
         "Vbo.GameConfig",
         "SteamVR_Actions",
-        "Vbo.GameScore"
+        "Vbo.GameScore",
+        "Unity.XR.OpenVR"
     ],
     "includePlatforms": [],
     "excludePlatforms": [],
@@ -32,6 +33,11 @@
         },
         {
             "name": "com.unity.xr.openvr.standalone",
+            "expression": "0.0.1",
+            "define": "OFFICIELOPENVR"
+        },
+        {
+            "name": "com.valvesoftware.unity.openvr",
             "expression": "0.0.1",
             "define": "OFFICIELOPENVR"
         },

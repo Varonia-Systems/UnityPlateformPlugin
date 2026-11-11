@@ -7,7 +7,8 @@
         "OpenVrBridge",
         "StrikerLink.Unity.Runtime",
         "SteamVR",
-        "Vbo.GameConfig"
+        "Vbo.GameConfig",
+        "Unity.XR.OpenVR"
     ],
     "includePlatforms": [
         "Editor"

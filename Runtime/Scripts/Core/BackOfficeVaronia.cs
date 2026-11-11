@@ -56,6 +56,12 @@ namespace VaroniaBackOffice
 
         [Header("Settings")]
         public GlobalConfig config;
+
+        [Header("Spectator")]
+        [Tooltip("Cappe le framerate quand ce poste est spectateur (le rendu spectateur n'a pas besoin de plus).")]
+        [SerializeField] private bool capFrameRateInSpectator = true;
+        [Tooltip("Framerate max appliqué en mode spectateur.")]
+        [SerializeField] private int spectatorFrameRateCap = 60;
 #if GAME_CONFIG
         public GameConfig gameConfig;
 #endif
@@ -110,6 +116,12 @@ namespace VaroniaBackOffice
         // Surveillance runtime du DeviceMode : si la config change (ex. on devient spectateur),
         // on lève OnMovieChanged automatiquement pour que tous les overlays se réévaluent.
         private DeviceMode? _lastDeviceMode = null;
+
+        // Cap framerate spectateur : valeurs d'origine mémorisées pour restauration si le poste
+        // repasse joueur au runtime.
+        private bool _frameRateCapped = false;
+        private int  _savedTargetFrameRate = -1;
+        private int  _savedVSyncCount = 1;
 
         // Merge FDP : ObjectCreationHandling.Replace → pour les listes/tableaux, le FDP
         // REMPLACE la liste existante au lieu d'y ajouter des éléments.
@@ -276,7 +288,40 @@ namespace VaroniaBackOffice
             if (_lastDeviceMode != config.DeviceMode)
             {
                 _lastDeviceMode = config.DeviceMode;
+                ApplySpectatorFrameRateCap();
                 RaiseMovieChanged();
+            }
+        }
+
+        /// <summary>
+        /// Spectateur : cappe le framerate à <see cref="spectatorFrameRateCap"/>. Le vSync est
+        /// désactivé le temps du cap, sinon <c>Application.targetFrameRate</c> est ignoré. Les
+        /// valeurs d'origine sont restaurées si le poste repasse joueur au runtime.
+        /// </summary>
+        private void ApplySpectatorFrameRateCap()
+        {
+            if (!capFrameRateInSpectator) return;
+
+            bool spectator = IsSpectator();
+
+            if (spectator && !_frameRateCapped)
+            {
+                _savedTargetFrameRate = Application.targetFrameRate;
+                _savedVSyncCount      = QualitySettings.vSyncCount;
+
+                QualitySettings.vSyncCount  = 0;
+                Application.targetFrameRate = spectatorFrameRateCap;
+                _frameRateCapped = true;
+
+                Debug.Log($"[BackOfficeVaronia] Mode spectateur → framerate cappé à {spectatorFrameRateCap} fps.");
+            }
+            else if (!spectator && _frameRateCapped)
+            {
+                QualitySettings.vSyncCount  = _savedVSyncCount;
+                Application.targetFrameRate = _savedTargetFrameRate;
+                _frameRateCapped = false;
+
+                Debug.Log("[BackOfficeVaronia] Sortie du mode spectateur → framerate restauré.");
             }
         }
 

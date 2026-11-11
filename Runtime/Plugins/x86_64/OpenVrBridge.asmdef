@@ -11,10 +11,17 @@
     "overrideReferences": false,
     "precompiledReferences": [],
     "autoReferenced": false,
-    "defineConstraints": [],
+    "defineConstraints": [
+        "!OFFICIELOPENVR"
+    ],
     "versionDefines": [
         {
             "name": "com.unity.xr.openvr.standalone",
+            "define": "OFFICIELOPENVR",
+            "expression": "0.0.1"
+        },
+        {
+            "name": "com.valvesoftware.unity.openvr",
             "define": "OFFICIELOPENVR",
             "expression": "0.0.1"
         }

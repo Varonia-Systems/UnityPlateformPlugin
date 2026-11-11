@@ -242,7 +242,7 @@ public class DebugSceneMenu : MonoBehaviour
                 {
                     // Appui court → départ immédiat (classique).
                     _triggerPhase = TriggerPhase.Idle;
-                    BackOfficeVaronia.Instance.TriggerStartGame(_pendingIsF3);
+                    BackOfficeVaronia.Instance.TriggerStartGame(!_pendingIsF3);
                 }
                 else
                 {
@@ -261,7 +261,7 @@ public class DebugSceneMenu : MonoBehaviour
                 if (_countdownTimer <= 0f)
                 {
                     _triggerPhase = TriggerPhase.Idle;
-                    BackOfficeVaronia.Instance.TriggerStartGame(_pendingIsF3);
+                    BackOfficeVaronia.Instance.TriggerStartGame(!_pendingIsF3);
                 }
                 break;
         }

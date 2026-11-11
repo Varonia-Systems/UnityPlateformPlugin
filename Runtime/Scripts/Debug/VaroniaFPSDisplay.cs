@@ -43,6 +43,16 @@ namespace VaroniaBackOffice
         [SerializeField] private int thresholdGood = 55;
         [SerializeField] private int thresholdWarn = 30;
 
+        [Header("Spectator auto-show")]
+        [Tooltip("En spectateur : widget masqué, affiché uniquement lors d'une chute de framerate.")]
+        [SerializeField] private bool spectatorAutoShow = true;
+        [Tooltip("Seuil FPS sous lequel la chute est comptée (spectateur).")]
+        [SerializeField] private int spectatorLowFps = 55;
+        [Tooltip("Durée consécutive sous le seuil avant affichage, en secondes.")]
+        [SerializeField] private float spectatorLowDuration = 5f;
+        [Tooltip("Durée d'affichage après déclenchement, en secondes.")]
+        [SerializeField] private float spectatorShowDuration = 10f;
+
         // ─── Palette partagée ────────────────────────────────────────────────────
 
         static readonly Color ColBg      = new Color(0.11f, 0.11f, 0.14f, 0.92f);
@@ -68,6 +78,12 @@ namespace VaroniaBackOffice
         private int     _lastSecond = -1;
         private readonly StringBuilder _sb = new StringBuilder(32);
         private bool show = true;
+
+        // Gate spectateur : temps passé sous le seuil, puis temps d'affichage restant.
+        private float _specLowTimer;
+        private float _specShowTimer;
+        private bool  _visible     = true;
+        private bool  _lastVisible = true;
 
         // ════════════════════════════════════════════════════════════════════════
         //  Lifecycle
@@ -125,10 +141,9 @@ namespace VaroniaBackOffice
             StopCoroutine(nameof(DelayedMiniCheck));
             StartCoroutine(nameof(DelayedMiniCheck));
 
-#if VBO_UITOOLKIT_OVERLAYS
-            if (_panel != null)
-                _panel.style.display = show ? DisplayStyle.Flex : DisplayStyle.None;
-#endif
+            // Réévalue tout de suite (le gate spectateur peut remasquer le widget).
+            _specLowTimer = _specShowTimer = 0f;
+            UpdateSpectatorGate(0f);
         }
 
         private IEnumerator DelayedMiniCheck()
@@ -275,12 +290,66 @@ namespace VaroniaBackOffice
 #endif
             }
 
+            // Gate spectateur (affichage uniquement sur chute de framerate)
+            UpdateSpectatorGate(dt);
+
 #if !VBO_UITOOLKIT_OVERLAYS
             if (mini != _lastMini)
             {
                 _lastMini = mini;
                 _rtDirty = true;
             }
+#endif
+        }
+
+        /// <summary>
+        /// En spectateur, le widget reste masqué tant que le framerate tient. Il s'affiche
+        /// <see cref="spectatorShowDuration"/> secondes dès que le FPS est resté sous
+        /// <see cref="spectatorLowFps"/> pendant <see cref="spectatorLowDuration"/> secondes
+        /// CONSÉCUTIVES ; passé la fenêtre d'affichage, la détection repart de zéro.
+        /// Hors spectateur (ou si spectatorAutoShow est faux), comportement inchangé.
+        /// </summary>
+        private void UpdateSpectatorGate(float dt)
+        {
+            bool gated = spectatorAutoShow && BackOfficeVaronia.IsSpectator();
+
+            if (!gated)
+            {
+                _specLowTimer  = 0f;
+                _specShowTimer = 0f;
+            }
+            else if (_specShowTimer > 0f)
+            {
+                _specShowTimer -= dt;
+                if (_specShowTimer <= 0f)
+                {
+                    _specShowTimer = 0f;
+                    _specLowTimer  = 0f;
+                }
+            }
+            else if (_fps > 0 && _fps < spectatorLowFps)
+            {
+                _specLowTimer += dt;
+                if (_specLowTimer >= spectatorLowDuration)
+                    _specShowTimer = spectatorShowDuration;
+            }
+            else
+            {
+                _specLowTimer = 0f;
+            }
+
+            ApplyVisibility(show && (!gated || _specShowTimer > 0f));
+        }
+
+        private void ApplyVisibility(bool visible)
+        {
+            _visible = visible;
+            if (_visible == _lastVisible) return;
+            _lastVisible = _visible;
+
+#if VBO_UITOOLKIT_OVERLAYS
+            if (_panel != null)
+                _panel.style.display = _visible ? DisplayStyle.Flex : DisplayStyle.None;
 #endif
         }
 
@@ -620,7 +689,7 @@ namespace VaroniaBackOffice
 
         private void OnGUI()
         {
-            if (!show) return;
+            if (!_visible) return;
             if (Event.current.type != EventType.Repaint) return;
 
             float scale = (Screen.height / 1080f) * scaleFactor;

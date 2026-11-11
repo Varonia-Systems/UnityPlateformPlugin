@@ -17,8 +17,8 @@ namespace VaroniaBackOffice
         [Tooltip("Épaisseur des lignes en unités monde.")]
         [SerializeField] private float lineWidth = 0.05f;
 
-        [Tooltip("Décalage Y des lignes par rapport au sol.")]
-        [SerializeField] private float yOffset = 0.02f;
+        [Tooltip("Décalage Y des lignes par rapport au sol (0.32 = 2 cm de garde + 30 cm de relevage par défaut).")]
+        [SerializeField] private float yOffset = 0.32f;
 
         [Tooltip("Utiliser la coordonnée Y des points (sinon tout est aplati à yOffset).")]
         [SerializeField] private bool usePointY = false;

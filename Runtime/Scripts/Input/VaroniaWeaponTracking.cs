@@ -7,6 +7,12 @@ namespace VBO_Ultimate.Runtime.Scripts.Input
 {
     public class VaroniaWeaponTracking : MonoBehaviour
     {
+#if UNITY_EDITOR
+        /// <summary>Orange desktop Play supplies a virtual tracker; do not claim physical gun hardware.</summary>
+        public static bool SkipHardwareForEditorSession { get; set; }
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        private static void ResetEditorHardwareOverride() => SkipHardwareForEditorSession = false;
+#endif
         // ─── Registry global (pour TrackingSuppressionZone & autres) ──────────────
         // HashSet<> alloc-free pour iterate quand on cherche les armes actives.
         private static readonly HashSet<VaroniaWeaponTracking> s_active = new HashSet<VaroniaWeaponTracking>();
@@ -79,6 +85,9 @@ namespace VBO_Ultimate.Runtime.Scripts.Input
 
         private IEnumerator Start()
         {
+#if UNITY_EDITOR
+            if (SkipHardwareForEditorSession) yield break;
+#endif
             yield return new WaitUntil(() => VaroniaWeapon.Instance != null);
             yield return new WaitUntil(() => BackOfficeVaronia.Instance != null && BackOfficeVaronia.Instance.config != null);
 
